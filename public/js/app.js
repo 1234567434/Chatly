@@ -842,6 +842,14 @@ function buildMsgHTML(msg, type) {
   if (msg.type === 'voice' && msg.fileInfo) {
     html += '<div class="msg-voice"' + fontAttr + '>';
     html += '<button class="voice-play-btn" data-url="' + msg.fileInfo.url + '" data-state="paused" onclick="toggleVoicePlay(this)">▶️</button>';
+    // Waveform bars (decorative)
+    html += '<div class="voice-waveform">';
+    var barCount = 24;
+    for (var bi = 0; bi < barCount; bi++) {
+      var h = Math.floor(Math.random() * 16) + 4;
+      html += '<div class="bar" style="height:' + h + 'px"></div>';
+    }
+    html += '</div>';
     html += '<span class="voice-duration">' + formatDuration(msg.fileInfo.duration) + '</span>';
     html += '</div>';
   } else if (msg.type === 'file' && msg.fileInfo) {
@@ -923,6 +931,8 @@ var currentPlayBtn = null;
 function toggleVoicePlay(btn) {
   var url = btn.dataset.url;
   var state = btn.dataset.state;
+  var voiceEl = btn.closest('.msg-voice');
+  var waveform = voiceEl ? voiceEl.querySelector('.voice-waveform') : null;
 
   // Stop any currently playing audio
   if (currentAudio && currentPlayBtn && currentPlayBtn !== btn) {
@@ -930,33 +940,39 @@ function toggleVoicePlay(btn) {
     currentAudio.currentTime = 0;
     currentPlayBtn.textContent = '▶️';
     currentPlayBtn.dataset.state = 'paused';
+    // Stop old waveform animation
+    var oldVoice = currentPlayBtn.closest('.msg-voice');
+    var oldWave = oldVoice ? oldVoice.querySelector('.voice-waveform') : null;
+    if (oldWave) oldWave.classList.remove('playing');
     currentAudio = null;
     currentPlayBtn = null;
   }
 
   if (state === 'paused') {
     // Start playing
-    if (!currentAudio) {
-      currentAudio = new Audio(url);
-      currentAudio.onended = function() {
-        btn.textContent = '▶️';
-        btn.dataset.state = 'paused';
-        currentAudio = null;
-        currentPlayBtn = null;
-      };
-      currentAudio.onerror = function() {
-        btn.textContent = '▶️';
-        btn.dataset.state = 'paused';
-        currentAudio = null;
-        currentPlayBtn = null;
-      };
-    }
+    currentAudio = new Audio(url);
     currentPlayBtn = btn;
+    currentAudio.onended = function() {
+      btn.textContent = '▶️';
+      btn.dataset.state = 'paused';
+      if (waveform) waveform.classList.remove('playing');
+      currentAudio = null;
+      currentPlayBtn = null;
+    };
+    currentAudio.onerror = function() {
+      btn.textContent = '▶️';
+      btn.dataset.state = 'paused';
+      if (waveform) waveform.classList.remove('playing');
+      currentAudio = null;
+      currentPlayBtn = null;
+    };
     btn.textContent = '⏸️';
     btn.dataset.state = 'playing';
+    if (waveform) waveform.classList.add('playing');
     currentAudio.play().catch(function() {
       btn.textContent = '▶️';
       btn.dataset.state = 'paused';
+      if (waveform) waveform.classList.remove('playing');
     });
   } else {
     // Pause
@@ -965,6 +981,7 @@ function toggleVoicePlay(btn) {
     }
     btn.textContent = '▶️';
     btn.dataset.state = 'paused';
+    if (waveform) waveform.classList.remove('playing');
   }
 }
 
