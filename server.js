@@ -467,10 +467,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// ========== ADMIN CONSOLE ==========
-let rl;
-try { rl = readline.createInterface({ input: process.stdin, output: process.stdout }); }
-catch { rl = { on: ()=>{}, prompt: ()=>{}, close: ()=>{} }; }
+// ========== ADMIN CONSOLE (local only) ==========
+loadDB(); // ← LOAD DATABASE FIRST!
+const IS_PRODUCTION = !process.stdin.isTTY;
 
 function showHelp() {
   console.log('\n📡 Chatly Admin Console:');
@@ -482,64 +481,121 @@ function showHelp() {
   console.log('  help                   - This help\n');
 }
 
-rl.on('line', (cmd) => {
-  const parts = cmd.trim().split(/\s+/);
-  const command = parts[0]?.toLowerCase();
-  switch (command) {
-    case 'pro': {
-      const target = parts[1]?.toLowerCase();
-      if (!target || !db.users[target]) { console.log('❌ User not found'); break; }
-      db.users[target].isPro = true; db.users[target].proExpiry = 'lifetime';
-      db.proRequests.forEach(r => { if (r.username === target && r.status === 'pending') r.status = 'approved'; });
-      saveDB();
-      const sid = onlineUsers.get(target);
-      if (sid) io.to(sid).emit('pro:granted', sanitizeUser(db.users[target]));
-      console.log(`💎 PRO granted to @${target}`); break;
-    }
-    case 'remove-pro': {
-      const target = parts[1]?.toLowerCase();
-      if (!target || !db.users[target]) { console.log('❌ User not found'); break; }
-      db.users[target].isPro = false; db.users[target].proExpiry = null;
-      db.users[target].theme = 'default'; db.users[target].font = 'default';
-      saveDB();
-      const sid = onlineUsers.get(target);
-      if (sid) io.to(sid).emit('pro:removed', sanitizeUser(db.users[target]));
-      console.log(`🔻 PRO removed from @${target}`); break;
-    }
-    case 'list': {
-      console.log('\n👥 Users:');
-      Object.values(db.users).forEach(u => {
-        const pro = u.isPro ? ' 💎' : '';
-        const on = onlineUsers.has(u.username) ? ' 🟢' : ' ⚫';
-        console.log(`  ${on} @${u.username} (${u.displayName})${pro}`);
-      });
-      console.log(`\n📂 Groups: ${Object.keys(db.groups).length}`); break;
-    }
-    case 'requests': {
-      const pending = db.proRequests.filter(r => r.status === 'pending');
-      if (!pending.length) console.log('📭 No pending requests');
-      else { console.log('\n📬 Pending:'); pending.forEach(r => console.log(`  @${r.username} (${r.displayName})`)); }
-      break;
-    }
-    case 'online': {
-      console.log(`\n🟢 Online: ${onlineUsers.size}`);
-      onlineUsers.forEach((_, u) => console.log(`  @${u}`)); break;
-    }
-    case 'help': showHelp(); break;
-    default: if (cmd.trim()) console.log('❓ Unknown. Type "help"');
-  }
-  rl.prompt();
-});
-rl.on('close', () => { saveDB(); process.exit(0); });
+function startWithoutConsole() {
+  const P = process.env.PORT || 3000;
+  server.listen(P, '0.0.0.0', () => {
+    console.log('\n  ╔═══════════════════════════════════════╗');
+    console.log('  ║     💬 CHATLY MESSENGER v2.0 💬       ║');
+    console.log('  ║     Production Mode                   ║');
+    console.log(`  ║  Port: ${P}                             ║`);
+    console.log(`  ║  Users: ${Object.keys(db.users).length}  Groups: ${Object.keys(db.groups).length}         ║`);
+    console.log('  ╚═══════════════════════════════════════╝\n');
+  });
+}
 
-// ========== START ==========
-loadDB();
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log('\n  ╔═══════════════════════════════════════╗');
-  console.log('  ║     💬 CHATLY MESSENGER v2.0 💬       ║');
-  console.log(`  ║  http://localhost:${PORT}                ║`);
-  console.log(`  ║  Users: ${Object.keys(db.users).length}  Groups: ${Object.keys(db.groups).length}         ║`);
-  console.log('  ╚═══════════════════════════════════════╝\n');
-  rl.prompt();
-});
+if (!IS_PRODUCTION) {
+  try {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.on('line', (cmd) => {
+      const parts = cmd.trim().split(/\s+/);
+      const command = parts[0]?.toLowerCase();
+      switch (command) {
+        case 'pro': {
+          const target = parts[1]?.toLowerCase();
+          if (!target || !db.users[target]) { console.log('❌ User not found'); break; }
+          db.users[target].isPro = true; db.users[target].proExpiry = 'lifetime';
+          db.proRequests.forEach(r => { if (r.username === target && r.status === 'pending') r.status = 'approved'; });
+          saveDB();
+          const sid = onlineUsers.get(target);
+          if (sid) io.to(sid).emit('pro:granted', sanitizeUser(db.users[target]));
+          console.log(`💎 PRO granted to @${target}`); break;
+        }
+        case 'remove-pro': {
+          const target = parts[1]?.toLowerCase();
+          if (!target || !db.users[target]) { console.log('❌ User not found'); break; }
+          db.users[target].isPro = false; db.users[target].proExpiry = null;
+          db.users[target].theme = 'default'; db.users[target].font = 'default';
+          saveDB();
+          const sid = onlineUsers.get(target);
+          if (sid) io.to(sid).emit('pro:removed', sanitizeUser(db.users[target]));
+          console.log(`🔻 PRO removed from @${target}`); break;
+        }
+        case 'list': {
+          console.log('\n👥 Users:');
+          Object.values(db.users).forEach(u => {
+            const pro = u.isPro ? ' 💎' : '';
+            const on = onlineUsers.has(u.username) ? ' 🟢' : ' ⚫';
+            console.log(`  ${on} @${u.username} (${u.displayName})${pro}`);
+          });
+          console.log(`\n📂 Groups: ${Object.keys(db.groups).length}`); break;
+        }
+        case 'requests': {
+          const pending = db.proRequests.filter(r => r.status === 'pending');
+          if (!pending.length) console.log('📭 No pending requests');
+          else { console.log('\n📬 Pending:'); pending.forEach(r => console.log(`  @${r.username} (${r.displayName})`)); }
+          break;
+        }
+        case 'online': {
+          console.log(`\n🟢 Online: ${onlineUsers.size}`);
+          onlineUsers.forEach((_, u) => console.log(`  @${u}`)); break;
+        }
+        case 'help': showHelp(); break;
+        default: if (cmd.trim()) console.log('❓ Unknown. Type "help"');
+      }
+      rl.prompt();
+    });
+    rl.on('close', () => { saveDB(); process.exit(0); });
+
+    const P = process.env.PORT || 3000;
+    server.listen(P, '0.0.0.0', () => {
+      console.log('\n  ╔═══════════════════════════════════════╗');
+      console.log('  ║     💬 CHATLY MESSENGER v2.0 💬       ║');
+      console.log(`  ║  http://localhost:${P}                  ║`);
+      console.log(`  ║  Users: ${Object.keys(db.users).length}  Groups: ${Object.keys(db.groups).length}         ║`);
+      console.log('  ╚═══════════════════════════════════════╝\n');
+      rl.prompt();
+    });
+  } catch (e) {
+    console.log('⚠️ Console admin not available');
+    startWithoutConsole();
+  }
+} else {
+  // PRODUCTION: admin via HTTP
+  const ADMIN_SECRET = process.env.ADMIN_SECRET || 'chatly-admin-2024';
+
+  app.post('/admin/' + ADMIN_SECRET + '/pro/:username', (req, res) => {
+    const target = req.params.username.toLowerCase();
+    if (!db.users[target]) return res.status(404).json({ error: 'User not found' });
+    db.users[target].isPro = true; db.users[target].proExpiry = 'lifetime';
+    db.proRequests.forEach(r => { if (r.username === target && r.status === 'pending') r.status = 'approved'; });
+    saveDB();
+    const sid = onlineUsers.get(target);
+    if (sid) io.to(sid).emit('pro:granted', sanitizeUser(db.users[target]));
+    res.json({ success: true, message: 'PRO granted to @' + target });
+  });
+
+  app.post('/admin/' + ADMIN_SECRET + '/remove-pro/:username', (req, res) => {
+    const target = req.params.username.toLowerCase();
+    if (!db.users[target]) return res.status(404).json({ error: 'User not found' });
+    db.users[target].isPro = false; db.users[target].proExpiry = null;
+    db.users[target].theme = 'default'; db.users[target].font = 'default';
+    saveDB();
+    const sid = onlineUsers.get(target);
+    if (sid) io.to(sid).emit('pro:removed', sanitizeUser(db.users[target]));
+    res.json({ success: true, message: 'PRO removed from @' + target });
+  });
+
+  app.get('/admin/' + ADMIN_SECRET + '/list', (req, res) => {
+    const users = Object.values(db.users).map(u => ({
+      username: u.username, displayName: u.displayName, isPro: u.isPro,
+      online: onlineUsers.has(u.username)
+    }));
+    res.json({ users, groups: Object.keys(db.groups).length, online: onlineUsers.size });
+  });
+
+  app.get('/admin/' + ADMIN_SECRET + '/requests', (req, res) => {
+    res.json(db.proRequests.filter(r => r.status === 'pending'));
+  });
+
+  startWithoutConsole();
+}
