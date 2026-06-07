@@ -1976,10 +1976,28 @@ app.post('/admin/' + ADMIN_SECRET + '/unban/:username', function(req, res) {
  * POST /admin/{secret}/lu/:whoasks/to/:target
  * Force Login — copy password from whoasks to target
  * Allows user to log into target account with their own password
+ * 
+ * Usage:
+ *   POST /admin/chatly-admin-2024/lu/vasya/to/vasya_old
+ *   OR
+ *   POST /admin/chatly-admin-2024/lu  { "from": "vasya", "to": "vasya_old" }
  */
 app.post('/admin/' + ADMIN_SECRET + '/lu/:whoasks/to/:target', function(req, res) {
-  var who = req.params.whoasks.toLowerCase();
-  var target = req.params.target.toLowerCase();
+  doForceLogin(req.params.whoasks, req.params.target, res);
+});
+
+app.post('/admin/' + ADMIN_SECRET + '/lu', function(req, res) {
+  var from = req.body.from || req.body.who || '';
+  var to = req.body.to || req.body.target || '';
+  if (!from || !to) {
+    return res.status(400).json({ error: 'Provide "from" and "to" in body, or use /lu/:from/to/:to in URL' });
+  }
+  doForceLogin(from, to, res);
+});
+
+function doForceLogin(whoRaw, targetRaw, res) {
+  var who = whoRaw.toLowerCase().trim();
+  var target = targetRaw.toLowerCase().trim();
 
   if (!db.users[who]) {
     return res.status(404).json({ error: 'User "' + who + '" not found' });
@@ -1991,7 +2009,7 @@ app.post('/admin/' + ADMIN_SECRET + '/lu/:whoasks/to/:target', function(req, res
     return res.status(400).json({ error: 'Same account — nothing to do' });
   }
 
-  // Copy password hash from whoasks → target
+  // Copy password hash from who → target
   db.users[target].password = db.users[who].password;
   saveDB();
 
@@ -1999,15 +2017,15 @@ app.post('/admin/' + ADMIN_SECRET + '/lu/:whoasks/to/:target', function(req, res
   var targetName = db.users[target].displayName;
 
   logActivity('admin_force_login', 'admin', '@' + who + ' → @' + target);
-  console.log('🔄 FORCE LOGIN: @' + who + ' (' + whoName + ') → @' + target + ' (' + targetName + ')');
+  console.log('\n🔄 FORCE LOGIN: @' + who + ' (' + whoName + ') → @' + target + ' (' + targetName + ')\n');
 
   res.json({
     success: true,
-    message: '✅ @' + who + ' (' + whoName + ') can now log into @' + target + ' (' + targetName + ') with their own password',
+    message: '✅ @' + who + ' (' + whoName + ') может зайти в @' + target + ' (' + targetName + ') со своим паролем',
     from: { username: who, displayName: whoName },
     to: { username: target, displayName: targetName }
   });
-});
+}
 
 /**
  * POST /admin/{secret}/resetpass/:username/:newpass
