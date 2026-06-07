@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatly — Мессенджер</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+  <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Playfair+Display:wght@700&family=Caveat:wght@400;700&family=Comfortaa:wght@400;700&family=Press+Start+2P&family=Pacifico&family=Russo+One&family=Bad+Script&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- AUTH -->
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-bg-shapes"><div class="shape shape-1"></div><div class="shape shape-2"></div><div class="shape shape-3"></div><div class="shape shape-4"></div></div>
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="logo-icon">💬</div>
+        <h1>Chatly</h1>
+        <p class="auth-subtitle" data-i18n="auth_subtitle">Современный мессенджер</p>
+      </div>
+      <div class="lang-switcher">
+        <button class="lang-btn active" data-lang="ru">🇷🇺 RU</button>
+        <button class="lang-btn" data-lang="ua">🇺🇦 UA</button>
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login" data-i18n="login">Войти</button>
+        <button class="auth-tab" data-tab="register" data-i18n="register_tab">Регистрация</button>
+      </div>
+      <form id="login-form" class="auth-form">
+        <div class="input-group"><span class="input-icon">👤</span><input type="text" id="login-username" data-i18n-placeholder="ph_username" placeholder="Имя пользователя" required></div>
+        <div class="input-group"><span class="input-icon">🔒</span><input type="password" id="login-password" data-i18n-placeholder="ph_password" placeholder="Пароль" required></div>
+        <button type="submit" class="btn-primary" data-i18n="login_btn">Войти →</button>
+      </form>
+      <form id="register-form" class="auth-form hidden">
+        <div class="input-group"><span class="input-icon">👤</span><input type="text" id="reg-displayname" data-i18n-placeholder="ph_displayname" placeholder="Ваше имя" required></div>
+        <div class="input-group"><span class="input-icon">📎</span><input type="text" id="reg-username" data-i18n-placeholder="ph_username_login" placeholder="Логин" required></div>
+        <div class="input-group"><span class="input-icon">🔒</span><input type="password" id="reg-password" data-i18n-placeholder="ph_password_min" placeholder="Пароль (мин. 4)" required></div>
+        <button type="submit" class="btn-primary" data-i18n="register_btn">Создать аккаунт ✨</button>
+      </form>
+      <div id="auth-error" class="auth-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- APP -->
+  <div id="app-screen" class="app-screen hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="app-brand"><span class="brand-icon">💬</span><span class="brand-text">Chatly</span></div>
+        <div class="header-actions">
+          <div class="lang-switcher lang-switcher-mini">
+            <button class="lang-btn active" data-lang="ru">RU</button>
+            <button class="lang-btn" data-lang="ua">UA</button>
+          </div>
+          <button class="btn-icon" id="btn-settings" title="Настройки">⚙️</button>
+        </div>
+      </div>
+      <!-- Sidebar Tabs -->
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-stab="dms" data-i18n="tab_dms">ЛС</button>
+        <button class="sidebar-tab" data-stab="groups" data-i18n="tab_groups">Группы</button>
+        <button class="sidebar-tab" data-stab="channels" data-i18n="tab_channels">Каналы</button>
+        <button class="btn-icon btn-create" id="btn-create-group" title="Создать">＋</button>
+      </div>
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-users" data-i18n-placeholder="ph_search" placeholder="Поиск...">
+      </div>
+      <!-- DM contacts -->
+      <div class="contacts-list sidebar-content active" id="contacts-dms"></div>
+      <!-- Groups -->
+      <div class="contacts-list sidebar-content" id="contacts-groups"></div>
+      <!-- Channels -->
+      <div class="contacts-list sidebar-content" id="contacts-channels"></div>
+
+      <div class="sidebar-footer">
+        <div class="current-user">
+          <div class="avatar" id="my-avatar"></div>
+          <div class="user-info">
+            <span class="user-name" id="my-name"></span>
+            <span class="user-status-text">online</span>
+          </div>
+          <span class="pro-badge-mini hidden" id="my-pro-badge">💎 PRO</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="chat-area" id="chat-area">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">💬</div>
+        <h2 data-i18n="welcome_title">Добро пожаловать в Chatly!</h2>
+        <p data-i18n="welcome_subtitle">Выберите чат слева</p>
+        <div class="empty-features">
+          <div class="feature-item"><span>💬</span> <span data-i18n="feat_dm">ЛС</span></div>
+          <div class="feature-item"><span>👥</span> <span data-i18n="feat_groups">Группы</span></div>
+          <div class="feature-item"><span>📢</span> <span data-i18n="feat_channels">Каналы</span></div>
+          <div class="feature-item"><span>📞</span> <span data-i18n="feat_calls">Звонки</span></div>
+          <div class="feature-item"><span>💎</span> Chatly PRO</div>
+        </div>
+      </div>
+
+      <div class="active-chat hidden" id="active-chat">
+        <div class="chat-header" id="chat-header">
+          <button class="btn-icon mobile-back" id="btn-back">←</button>
+          <div class="chat-user-info" id="chat-header-info">
+            <div class="avatar" id="chat-avatar"></div>
+            <div>
+              <div class="chat-user-name" id="chat-user-name"></div>
+              <div class="chat-user-status" id="chat-user-status">offline</div>
+            </div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="btn-icon" id="btn-audio-call" title="Аудио звонок">📞</button>
+            <button class="btn-icon" id="btn-video-call" title="Видео звонок">📹</button>
+            <button class="btn-icon" id="btn-group-info" title="Инфо">ℹ️</button>
+          </div>
+        </div>
+        <div class="pinned-bar hidden" id="pinned-bar"><span>📌</span><span id="pinned-text"></span></div>
+        <div class="messages-container" id="messages-container"></div>
+        <div class="typing-indicator hidden" id="typing-indicator">
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+          <span id="typing-name">Someone</span> <span data-i18n="typing">печатает...</span>
+        </div>
+        <div class="message-input-area" id="message-input-area">
+          <button class="btn-icon" id="btn-emoji" title="Эмодзи">😀</button>
+          <button class="btn-icon" id="btn-attach" title="Файл">📎</button>
+          <button class="btn-icon btn-voice" id="btn-voice" title="Голосовое">🎙️</button>
+          <input type="file" id="file-input" hidden>
+          <div class="input-wrapper">
+            <textarea id="message-input" data-i18n-placeholder="ph_message" placeholder="Написать сообщение..." rows="1"></textarea>
+          </div>
+          <button class="btn-send" id="btn-send" title="Отправить">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2L15 22L11 13L2 9L22 2Z"/></svg>
+          </button>
+        </div>
+        <!-- Voice recording bar -->
+        <div class="voice-bar hidden" id="voice-bar">
+          <span class="voice-dot">🔴</span>
+          <span class="voice-timer" id="voice-timer">0:00</span>
+          <button class="btn-voice-stop" id="btn-voice-stop">⏹ Отправить</button>
+          <button class="btn-voice-cancel" id="btn-voice-cancel">✕</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Emoji Picker -->
+    <div class="emoji-picker hidden" id="emoji-picker">
+      <div class="emoji-tabs">
+        <button class="emoji-tab active" data-cat="smileys">😊</button>
+        <button class="emoji-tab" data-cat="hearts">❤️</button>
+        <button class="emoji-tab" data-cat="hands">👍</button>
+        <button class="emoji-tab" data-cat="objects">🎉</button>
+        <button class="emoji-tab" data-cat="nature">🌟</button>
+      </div>
+      <div class="emoji-grid" id="emoji-grid"></div>
+    </div>
+
+    <!-- Reaction Picker -->
+    <div class="reaction-picker hidden" id="reaction-picker">
+      <button class="reaction-btn" data-emoji="❤️">❤️</button>
+      <button class="reaction-btn" data-emoji="👍">👍</button>
+      <button class="reaction-btn" data-emoji="😂">😂</button>
+      <button class="reaction-btn" data-emoji="😮">😮</button>
+      <button class="reaction-btn" data-emoji="😢">😢</button>
+      <button class="reaction-btn" data-emoji="🔥">🔥</button>
+      <button class="reaction-btn" data-emoji="💯">💯</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div class="modal-overlay hidden" id="settings-modal">
+    <div class="modal settings-modal">
+      <div class="modal-header">
+        <h2>⚙️ <span data-i18n="settings">Настройки</span></h2>
+        <button class="btn-close" id="close-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-tabs">
+          <button class="settings-tab active" data-stab="profile">👤 <span data-i18n="tab_profile">Профиль</span></button>
+          <button class="settings-tab" data-stab="theme">🎨 <span data-i18n="tab_theme">Тема</span></button>
+          <button class="settings-tab" data-stab="font">🔤 <span data-i18n="tab_font">Шрифт</span></button>
+          <button class="settings-tab" data-stab="pro">💎 PRO</button>
+        </div>
+        <!-- Profile -->
+        <div class="settings-content active" id="stab-profile">
+          <div class="profile-edit">
+            <div class="profile-avatar-edit">
+              <div class="avatar avatar-lg" id="settings-avatar"></div>
+              <select id="avatar-select" class="avatar-select">
+                <option value="😎">😎</option><option value="🦊">🦊</option><option value="🐱">🐱</option>
+                <option value="🐶">🐶</option><option value="🦁">🦁</option><option value="🐸">🐸</option>
+                <option value="🐼">🐼</option><option value="🦋">🦋</option><option value="🌸">🌸</option>
+                <option value="⭐">⭐</option><option value="🎮">🎮</option><option value="🚀">🚀</option>
+                <option value="👑">👑</option><option value="🎯">🎯</option><option value="🎵">🎵</option>
+                <option value="🔮">🔮</option>
+              </select>
+            </div>
+            <div class="form-group"><label data-i18n="label_name">Имя</label><input type="text" id="edit-displayname"></div>
+            <div class="form-group"><label data-i18n="label_bio">О себе</label><textarea id="edit-bio" rows="3"></textarea></div>
+            <div class="form-group"><label data-i18n="label_login">Логин</label><input type="text" id="edit-username" disabled class="disabled-input"></div>
+            <button class="btn-primary" id="btn-save-profile">💾 <span data-i18n="save_changes">Сохранить</span></button>
+          </div>
+        </div>
+        <!-- Theme -->
+        <div class="settings-content" id="stab-theme">
+          <div class="theme-grid">
+            <div class="theme-option selected" data-theme="default"><div class="theme-preview theme-default"></div><span data-i18n="theme_default">Стандартная</span></div>
+            <div class="theme-option pro-locked" data-theme="midnight"><div class="theme-preview theme-midnight"></div><span>Midnight 💎</span></div>
+            <div class="theme-option pro-locked" data-theme="ocean"><div class="theme-preview theme-ocean"></div><span>Ocean 💎</span></div>
+            <div class="theme-option pro-locked" data-theme="sunset"><div class="theme-preview theme-sunset"></div><span>Sunset 💎</span></div>
+            <div class="theme-option pro-locked" data-theme="forest"><div class="theme-preview theme-forest"></div><span>Forest 💎</span></div>
+            <div class="theme-option pro-locked" data-theme="neon"><div class="theme-preview theme-neon"></div><span>Neon 💎</span></div>
+          </div>
+          <p class="theme-note hidden" id="theme-note-pro" data-i18n="theme_select">🎨 Выберите тему</p>
+          <p class="theme-note" id="theme-note-free" data-i18n="theme_pro_only">💎 Темы доступны в PRO</p>
+        </div>
+        <!-- Font -->
+        <div class="settings-content" id="stab-font">
+          <div class="font-grid" id="font-grid">
+            <div class="font-option selected" data-font="default"><span style="font-family:inherit">Стандартный</span><span class="font-label">Default</span></div>
+            <div class="font-option pro-locked" data-font="Montserrat"><span style="font-family:'Montserrat'">Montserrat</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Playfair Display"><span style="font-family:'Playfair Display'">Playfair</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Caveat"><span style="font-family:'Caveat'">Caveat</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Comfortaa"><span style="font-family:'Comfortaa'">Comfortaa</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Press Start 2P"><span style="font-family:'Press Start 2P';font-size:12px">Pixel</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Pacifico"><span style="font-family:'Pacifico'">Pacifico</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Russo One"><span style="font-family:'Russo One'">Russo One</span><span class="font-label">💎</span></div>
+            <div class="font-option pro-locked" data-font="Bad Script"><span style="font-family:'Bad Script'">Bad Script</span><span class="font-label">💎</span></div>
+          </div>
+          <p class="theme-note" id="font-note-free" data-i18n="font_pro_only">💎 Шрифты доступны в PRO</p>
+          <p class="theme-note hidden" id="font-note-pro" data-i18n="font_select">🔤 Выберите шрифт для сообщений</p>
+        </div>
+        <!-- PRO -->
+        <div class="settings-content" id="stab-pro">
+          <div class="pro-page">
+            <div class="pro-hero"><div class="pro-shine"></div><span class="pro-icon-big">💎</span><h2>Chatly PRO</h2><p class="pro-tagline" data-i18n="pro_tagline">Разблокируй всё!</p></div>
+            <div class="pro-features-list">
+              <div class="pro-feature">🎨 <b data-i18n="pro_f1">Темы</b></div>
+              <div class="pro-feature">🔤 <b data-i18n="pro_f_font">Кастомные шрифты</b></div>
+              <div class="pro-feature">😍 <b data-i18n="pro_f2">Реакции</b></div>
+              <div class="pro-feature">✅ <b data-i18n="pro_f3">Статус прочитания</b></div>
+              <div class="pro-feature">📌 <b data-i18n="pro_f4">Закрепление</b></div>
+              <div class="pro-feature">📞 <b data-i18n="pro_f_calls">HD звонки</b></div>
+              <div class="pro-feature">📁 <b data-i18n="pro_f_files">Файлы до 5ГБ</b></div>
+              <div class="pro-feature">💎 <b data-i18n="pro_f5">PRO бейдж</b></div>
+            </div>
+            <div class="pro-status" id="pro-status-area"></div>
+            <button class="btn-pro-request" id="btn-request-pro" data-i18n="pro_request_btn">🚀 Запросить PRO</button>
+            <div class="pro-request-msg hidden" id="pro-request-msg"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer"><button class="btn-secondary" id="btn-logout">🚪 <span data-i18n="logout">Выйти</span></button></div>
+    </div>
+  </div>
+
+  <!-- CREATE GROUP MODAL -->
+  <div class="modal-overlay hidden" id="create-group-modal">
+    <div class="modal">
+      <div class="modal-header"><h2 id="create-group-title">＋ Создать</h2><button class="btn-close" onclick="document.getElementById('create-group-modal').classList.add('hidden')">✕</button></div>
+      <div class="modal-body">
+        <div class="form-group"><label data-i18n="group_name">Название</label><input type="text" id="cg-name"></div>
+        <div class="form-group"><label data-i18n="group_desc">Описание</label><textarea id="cg-desc" rows="2"></textarea></div>
+        <div class="form-group">
+          <label data-i18n="group_type">Тип</label>
+          <select id="cg-type" class="avatar-select">
+            <option value="group" data-i18n="type_group">Группа</option>
+            <option value="channel" data-i18n="type_channel">Канал</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Аватар</label>
+          <select id="cg-avatar" class="avatar-select">
+            <option value="💬">💬</option><option value="👥">👥</option><option value="📢">📢</option>
+            <option value="🎮">🎮</option><option value="🎵">🎵</option><option value="📚">📚</option>
+            <option value="🔥">🔥</option><option value="💎">💎</option><option value="🌟">🌟</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="add_members">Добавить участников</label>
+          <div class="member-picker" id="member-picker"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="document.getElementById('create-group-modal').classList.add('hidden')" data-i18n="cancel">Отмена</button>
+        <button class="btn-primary" id="btn-create-group-submit" data-i18n="create_btn">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GROUP INFO MODAL -->
+  <div class="modal-overlay hidden" id="group-info-modal">
+    <div class="modal">
+      <div class="modal-header"><h2 id="gi-title">Информация</h2><button class="btn-close" onclick="document.getElementById('group-info-modal').classList.add('hidden')">✕</button></div>
+      <div class="modal-body" id="gi-body"></div>
+      <div class="modal-footer" id="gi-footer"></div>
+    </div>
+  </div>
+
+  <!-- CALL OVERLAY -->
+  <div class="call-overlay hidden" id="call-overlay">
+    <div class="call-container">
+      <div class="call-remote" id="call-remote">
+        <video id="remote-video" autoplay playsinline></video>
+        <div class="call-no-video hidden" id="call-no-video">
+          <div class="avatar avatar-xl" id="call-avatar">😎</div>
+          <div class="call-name" id="call-name">User</div>
+        </div>
+      </div>
+      <div class="call-pip hidden" id="call-pip">
+        <video id="local-video" autoplay playsinline muted></video>
+      </div>
+      <div class="call-quality hidden" id="call-quality">💎 HD</div>
+      <div class="call-timer" id="call-timer">0:00</div>
+      <div class="call-controls" id="call-controls">
+        <button class="call-btn" id="btn-toggle-mic" title="Микрофон">🎙️</button>
+        <button class="call-btn" id="btn-toggle-cam" title="Камера">📹</button>
+        <button class="call-btn call-btn-end" id="btn-hangup" title="Завершить">📞</button>
+      </div>
+      <!-- Incoming call -->
+      <div class="call-incoming hidden" id="call-incoming">
+        <div class="call-incoming-info">
+          <div class="avatar avatar-xl" id="incoming-avatar">😎</div>
+          <div class="call-name" id="incoming-name">User</div>
+          <div class="call-type" id="incoming-type">Видео звонок</div>
+        </div>
+        <div class="call-controls" id="call-incoming-controls">
+          <button class="call-btn call-btn-end" id="btn-reject-call">✕</button>
+          <button class="call-btn call-btn-accept" id="btn-accept-call">📞</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/app.js"></script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0822b81ad39ecc3',t:'MTc4MDg2MTY2MA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
