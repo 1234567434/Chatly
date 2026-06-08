@@ -1,4 +1,4 @@
-// ============================================================================
+  // ============================================================================
 //  CHATLY MESSENGER v3.0 — FULL SERVER
 //  Express + Socket.IO + JWT Auth + SQLite-like JSON Storage
 //  Deploy-ready for Render.com (no readline, no process.exit, binds 0.0.0.0)
@@ -358,6 +358,9 @@ app.post('/api/register', function(req, res) {
 
   logActivity('register', un, 'New account created');
   console.log('🆕 New user: @' + un + ' (' + dn + ')');
+
+  // Broadcast new user to all connected clients so they appear in contact lists
+  io.emit('user:registered', sanitizeUser(db.users[un]));
 
   res.json({
     token: token,
@@ -1514,6 +1517,7 @@ io.on('connection', function(socket) {
 
     // Confirm to sender
     socket.emit('message:sent', msg);
+    saveDB();
   });
 
   // -------------------------------------------------------
@@ -1560,6 +1564,7 @@ io.on('connection', function(socket) {
     const otherSocket = onlineUsers.get(data.to);
     if (otherSocket) io.to(otherSocket).emit('message:reaction', { chatId: chatId, msg: msg });
     socket.emit('message:reaction', { chatId: chatId, msg: msg });
+    saveDB();
   });
 
   // -------------------------------------------------------
@@ -1577,6 +1582,7 @@ io.on('connection', function(socket) {
     const otherSocket = onlineUsers.get(data.to);
     if (otherSocket) io.to(otherSocket).emit('message:pinUpdate', { chatId: chatId, msg: msg });
     socket.emit('message:pinUpdate', { chatId: chatId, msg: msg });
+    saveDB();
   });
 
   // -------------------------------------------------------
@@ -1637,6 +1643,7 @@ io.on('connection', function(socket) {
         if (ms) io.to(ms).emit('group:newMessage', { groupId: g.id, msg: msg });
       }
     });
+    saveDB();
   });
 
   // -------------------------------------------------------
