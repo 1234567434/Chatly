@@ -8,6 +8,9 @@ var proRequestPending = false, allUsers = [], userGroups = [];
 var voiceRecorder = null, voiceChunks = [], voiceStartTime = 0, voiceTimerInterval = null;
 var peerConnection = null, localStream = null, callPartner = null, callTimerInterval = null, callStartTime = 0;
 var _initialConnect = true;
+var replyToMsg = null;
+var editingMsgId = null;
+var adminSecret = localStorage.getItem('chatly_admin_secret') || '';
 
 // ===== EMOJI DATA =====
 var EMOJIS = {
@@ -49,6 +52,14 @@ document.addEventListener('DOMContentLoaded', function() {
     showAuth();
   }
   setupEventListeners();
+
+  // Admin shortcut: Ctrl+Shift+A
+  document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+      e.preventDefault();
+      if (currentUser) openAdminPanel();
+    }
+  });
 });
 
 function showAuth() {
@@ -210,6 +221,24 @@ function setupEventListeners() {
 
   // PRO request
   document.getElementById('btn-request-pro').addEventListener('click', requestPro);
+
+  // Reply bar close
+  document.getElementById('reply-bar-close').addEventListener('click', cancelReply);
+  // Edit bar close
+  document.getElementById('edit-bar-close').addEventListener('click', cancelEdit);
+
+  // Admin panel
+  document.getElementById('btn-admin-login').addEventListener('click', adminLogin);
+  document.getElementById('close-admin').addEventListener('click', function() {
+    document.getElementById('admin-modal').classList.add('hidden');
+  });
+  document.getElementById('admin-user-search').addEventListener('input', function() {
+    // Re-render with search
+    fetch(API + '/admin/' + adminSecret + '/list').then(function(r) { return r.json(); }).then(function(d) { renderAdminUsers(d.users || []); });
+  });
+  document.getElementById('admin-secret-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') adminLogin();
+  });
 
   // Search
   document.getElementById('search-users').addEventListener('input', filterCurrentList);
@@ -512,9 +541,24 @@ function connectSocket() {
   socket.on('message:readUpdate', function(data) {
     console.log('👁️ message:readUpdate', data);
     if (activeChat === data.chatUser && activeChatType === 'dm') {
-      // Re-render messages to show read status
       loadMessages(activeChat);
     }
+  });
+
+  socket.on('message:edited', function(data) {
+    console.log('✏️ message:edited', data);
+    if (activeChatType === 'dm') loadMessages(activeChat);
+  });
+
+  socket.on('message:deleted', function(data) {
+    console.log('🗑️ message:deleted', data.msgId);
+    var el = document.querySelector('[data-msg-id="' + data.msgId + '"]');
+    if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(function() { el.remove(); }, 300); }
+  });
+
+  socket.on('group:messageEdited', function(data) {
+    console.log('✏️ group:messageEdited');
+    if (activeChat === data.groupId && activeChatType === 'group') loadGroupMessages(activeChat);
   });
 
   socket.on('message:reaction', function(data) {
@@ -1049,6 +1093,25 @@ function buildMsgHTML(msg, type) {
   }
   html += '<div class="msg-avatar">' + avContent + '</div>';
   html += '<div class="msg-content">';
+  // Reply quote
+  if (msg.replyTo) {
+    var replyMsg = null;
+    if (type === 'dm' && activeChat) {
+      // Find from currently loaded messages
+      var replyEl = document.querySelector('[data-msg-id="' + msg.replyTo + '"] .msg-text');
+      var replySenderEl = document.querySelector('[data-msg-id="' + msg.replyTo + '"] .msg-sender');
+      var replyText = replyEl ? replyEl.textContent.substring(0, 60) : '💬 Сообщение';
+      var replySender = replySenderEl ? replySenderEl.textContent : getDisplayName(msg.replyTo);
+      html += '<div class="msg-reply-quote" onclick="scrollToMsg(\'' + msg.replyTo + '\')">';
+      html += '<div class="reply-quote-bar"></div>';
+      html += '<div class="reply-quote-content">';
+      html += '<span class="reply-quote-name">' + esc(replySender) + '</span>';
+      html += '<span class="reply-quote-text">' + esc(replyText) + '</span>';
+      html += '</div></div>';
+    } else {
+      html += '<div class="msg-reply-quote"><div class="reply-quote-bar"></div><div class="reply-quote-content"><span class="reply-quote-text">💬 Сообщение</span></div></div>';
+    }
+  }
   html += '<div class="msg-header">';
   html += '<span class="msg-sender">' + esc(name) + '</span>';
 
@@ -1092,6 +1155,10 @@ function buildMsgHTML(msg, type) {
 
   if (msg.text) {
     html += '<div class="msg-text"' + fontAttr + '>' + formatMsgText(msg.text) + '</div>';
+  }
+
+  if (msg.edited) {
+    html += '<span class="msg-edited-label">ред.</span>';
   }
 
   // Reactions
@@ -1138,8 +1205,8 @@ function attachSingleMsgEvents(el, isOwn) {
     showContextMenu(e, el.dataset.msgId, isOwn);
   });
 
-  // Double click for reaction (PRO only)
-  if (currentUser && currentUser.isPro) {
+  // Double click for reaction
+  {
     el.addEventListener('dblclick', function(e) {
       e.preventDefault();
       showReactionPicker(e, el.dataset.msgId);
@@ -1253,15 +1320,30 @@ function sendMessage() {
   var text = input.value.trim();
   if (!text) return;
 
+  // Edit mode
+  if (editingMsgId) {
+    if (activeChatType === 'dm') {
+      socket.emit('message:edit', { to: activeChat, msgId: editingMsgId, text: text });
+    } else if (activeChatType === 'group') {
+      socket.emit('group:editMessage', { groupId: activeChat, msgId: editingMsgId, text: text });
+    }
+    cancelEdit();
+    input.value = '';
+    autoResize(input);
+    document.getElementById('emoji-picker').classList.add('hidden');
+    return;
+  }
+
   input.value = '';
   autoResize(input);
 
   if (activeChatType === 'dm') {
-    socket.emit('message:send', { to: activeChat, text: text, type: 'text' });
+    socket.emit('message:send', { to: activeChat, text: text, type: 'text', replyTo: replyToMsg || null });
   } else if (activeChatType === 'group') {
-    socket.emit('group:message', { groupId: activeChat, text: text, type: 'text' });
+    socket.emit('group:message', { groupId: activeChat, text: text, type: 'text', replyTo: replyToMsg || null });
   }
 
+  cancelReply();
   // Hide emoji picker
   document.getElementById('emoji-picker').classList.add('hidden');
 }
@@ -2045,11 +2127,19 @@ function showContextMenu(e, msgId, isOwn) {
   menu.className = 'msg-context-menu show';
   menu.id = 'context-menu';
 
-  if (currentUser && currentUser.isPro) {
-    menu.innerHTML += '<button class="msg-context-btn pro-only" onclick="reactToMsg(\'' + msgId + '\')">' + t('ctx_react') + '</button>';
-    menu.innerHTML += '<button class="msg-context-btn pro-only" onclick="pinMsg(\'' + msgId + '\')">' + t('ctx_pin') + '</button>';
+  // Reply — always available
+  menu.innerHTML += '<button class="msg-context-btn" onclick="startReply(\'' + msgId + '\')">↩️ Ответить</button>';
+  // Reactions — always available
+  menu.innerHTML += '<button class="msg-context-btn" onclick="reactToMsg(\'' + msgId + '\')">😍 Реакция</button>';
+  // Pin — always available
+  menu.innerHTML += '<button class="msg-context-btn" onclick="pinMsg(\'' + msgId + '\')">📌 Закрепить</button>';
+  // Copy
+  menu.innerHTML += '<button class="msg-context-btn" onclick="copyMsg(\'' + msgId + '\')">📋 Копировать</button>';
+  // Edit & Delete — only own messages
+  if (isOwn) {
+    menu.innerHTML += '<button class="msg-context-btn" onclick="startEdit(\'' + msgId + '\')">✏️ Редактировать</button>';
+    menu.innerHTML += '<button class="msg-context-btn" style="color:var(--danger)" onclick="deleteMsg(\'' + msgId + '\')">🗑️ Удалить</button>';
   }
-  menu.innerHTML += '<button class="msg-context-btn" onclick="copyMsg(\'' + msgId + '\')">' + t('ctx_copy') + '</button>';
 
   msgEl.style.position = 'relative';
   msgEl.appendChild(menu);
@@ -2105,6 +2195,70 @@ function copyMsg(msgId) {
   }
 }
 
+// ===== REPLY =====
+function startReply(msgId) {
+  closeContextMenu();
+  // Find the message text
+  var msgEl = document.querySelector('[data-msg-id="' + msgId + '"]');
+  var msgTextEl = msgEl ? msgEl.querySelector('.msg-text') : null;
+  var senderEl = msgEl ? msgEl.querySelector('.msg-sender') : null;
+  if (!msgEl) return;
+
+  replyToMsg = msgId;
+  editingMsgId = null; // cancel any edit
+
+  document.getElementById('reply-bar').classList.remove('hidden');
+  document.getElementById('edit-bar').classList.add('hidden');
+  document.getElementById('reply-bar-name').textContent = senderEl ? senderEl.textContent : 'User';
+  document.getElementById('reply-bar-text').textContent = msgTextEl ? msgTextEl.textContent.substring(0, 80) : '...';
+  document.getElementById('message-input').focus();
+}
+
+function cancelReply() {
+  replyToMsg = null;
+  document.getElementById('reply-bar').classList.add('hidden');
+}
+
+// ===== EDIT =====
+function startEdit(msgId) {
+  closeContextMenu();
+  var msgEl = document.querySelector('[data-msg-id="' + msgId + '"]');
+  var msgTextEl = msgEl ? msgEl.querySelector('.msg-text') : null;
+  if (!msgEl || !msgTextEl) return;
+
+  editingMsgId = msgId;
+  replyToMsg = null;
+
+  document.getElementById('edit-bar').classList.remove('hidden');
+  document.getElementById('reply-bar').classList.add('hidden');
+  document.getElementById('edit-bar-text').textContent = msgTextEl.textContent.substring(0, 80);
+  
+  var input = document.getElementById('message-input');
+  input.value = msgTextEl.textContent;
+  input.focus();
+  autoResize(input);
+}
+
+function cancelEdit() {
+  editingMsgId = null;
+  document.getElementById('edit-bar').classList.add('hidden');
+  document.getElementById('message-input').value = '';
+}
+
+// ===== DELETE =====
+function deleteMsg(msgId) {
+  closeContextMenu();
+  if (!confirm('Удалить сообщение?')) return;
+  if (activeChatType === 'dm') {
+    socket.emit('message:delete', { to: activeChat, msgId: msgId });
+  } else if (activeChatType === 'group') {
+    socket.emit('group:deleteMessage', { groupId: activeChat, msgId: msgId });
+  }
+  // Remove from DOM
+  var el = document.querySelector('[data-msg-id="' + msgId + '"]');
+  if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(function() { el.remove(); }, 300); }
+}
+
 function showReactionPicker(e, msgId) {
   e.preventDefault();
   var btn = document.querySelector('[data-msg-id="' + msgId + '"]');
@@ -2135,6 +2289,165 @@ function showReactionPicker(e, msgId) {
       document.removeEventListener('click', hide);
     }
   });
+}
+
+// ===== ADMIN PANEL =====
+function openAdminPanel() {
+  document.getElementById('admin-modal').classList.remove('hidden');
+  if (adminSecret) {
+    adminLogin();
+  }
+}
+
+function adminLogin() {
+  var secret = document.getElementById('admin-secret-input').value.trim();
+  if (!secret && !adminSecret) { showToast('Введите ключ', 'error'); return; }
+  if (secret) adminSecret = secret;
+  localStorage.setItem('chatly_admin_secret', adminSecret);
+
+  // Verify by fetching user list
+  fetch(API + '/admin/' + adminSecret + '/list').then(function(r) {
+    if (!r.ok) { showToast('❌ Неверный ключ', 'error'); adminSecret = ''; localStorage.removeItem('chatly_admin_secret'); return; }
+    document.getElementById('admin-login-section').classList.add('hidden');
+    document.getElementById('admin-dashboard').classList.remove('hidden');
+    loadAdminData();
+  }).catch(function() { showToast('❌ Ошибка подключения', 'error'); });
+}
+
+async function loadAdminData() {
+  try {
+    // Stats
+    var statsRes = await fetch(API + '/admin/' + adminSecret + '/stats');
+    var stats = await statsRes.json();
+    document.getElementById('admin-stats').innerHTML =
+      '<div class="stat-card"><div class="stat-value">' + stats.users.total + '</div><div class="stat-label">Пользователей</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + stats.users.online + '</div><div class="stat-label">Онлайн</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + stats.messages.total + '</div><div class="stat-label">Сообщений</div></div>' +
+      '<div class="stat-card"><div class="stat-value">' + stats.groups.total + '</div><div class="stat-label">Групп</div></div>';
+
+    // Users
+    var usersRes = await fetch(API + '/admin/' + adminSecret + '/list');
+    var usersData = await usersRes.json();
+    renderAdminUsers(usersData.users || []);
+
+    // PRO requests
+    var proRes = await fetch(API + '/admin/' + adminSecret + '/requests');
+    var proReqs = await proRes.json();
+    var proHtml = proReqs.length === 0 ? '<div style="padding:10px;color:var(--text-3)">Нет запросов</div>' :
+      proReqs.map(function(r) {
+        return '<div class="admin-user-item"><span>' + esc(r.displayName) + ' (@' + r.username + ')</span><button class="btn-primary" style="font-size:11px;padding:5px 12px" onclick="adminGrantPROTo(\'' + r.username + '\')">💎 Дать PRO</button></div>';
+      }).join('');
+    document.getElementById('admin-pro-requests').innerHTML = proHtml;
+
+    // Reports
+    var repRes = await fetch(API + '/admin/' + adminSecret + '/reports');
+    var reports = await repRes.json();
+    var repHtml = reports.length === 0 ? '<div style="padding:10px;color:var(--text-3)">Нет жалоб</div>' :
+      reports.map(function(r) {
+        return '<div class="admin-user-item"><span>🚨 @' + r.from + ' → @' + r.target + ': ' + esc(r.reason) + '</span></div>';
+      }).join('');
+    document.getElementById('admin-reports').innerHTML = repHtml;
+
+    // Activity
+    var actRes = await fetch(API + '/admin/' + adminSecret + '/activity');
+    var activity = await actRes.json();
+    var actHtml = activity.slice(0, 30).map(function(a) {
+      return '<div class="admin-log-item"><span class="log-time">' + formatTime(a.timestamp) + '</span><span class="log-type">' + a.type + '</span><span class="log-user">@' + a.username + '</span><span class="log-details">' + esc(a.details) + '</span></div>';
+    }).join('');
+    document.getElementById('admin-activity').innerHTML = actHtml || '<div style="padding:10px;color:var(--text-3)">Пусто</div>';
+  } catch (err) {
+    showToast('❌ Ошибка загрузки', 'error');
+  }
+}
+
+function renderAdminUsers(users) {
+  var search = (document.getElementById('admin-user-search').value || '').toLowerCase();
+  var filtered = users.filter(function(u) {
+    return u.username.includes(search) || u.displayName.toLowerCase().includes(search);
+  });
+  document.getElementById('admin-user-list').innerHTML = filtered.map(function(u) {
+    var badge = u.isPro ? ' 💎' : '';
+    var online = u.online ? '🟢' : '⚫';
+    return '<div class="admin-user-item">' +
+      '<div class="admin-user-info"><span>' + online + ' ' + esc(u.displayName) + badge + '</span><span class="admin-user-un">@' + u.username + '</span></div>' +
+      '<div class="admin-user-actions">' +
+      (u.isPro ? '<button class="btn-secondary" style="font-size:10px;padding:3px 10px" onclick="adminRemovePROFrom(\'' + u.username + '\')">❌ PRO</button>' :
+        '<button class="btn-primary" style="font-size:10px;padding:3px 10px" onclick="adminGrantPROTo(\'' + u.username + '\')">💎 PRO</button>') +
+      '</div></div>';
+  }).join('');
+}
+
+function adminGrantPROTo(username) {
+  fetch(API + '/admin/' + adminSecret + '/pro/' + username, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '✅ PRO выдан @' + username : '❌ ' + d.error, d.success ? 'success' : 'error');
+    loadAdminData();
+  });
+}
+
+function adminRemovePROFrom(username) {
+  fetch(API + '/admin/' + adminSecret + '/remove-pro/' + username, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '✅ PRO снят' : '❌ ' + d.error, d.success ? 'success' : 'error');
+    loadAdminData();
+  });
+}
+
+function adminGrantPRO() {
+  var u = document.getElementById('admin-quick-user').value.trim().toLowerCase();
+  if (!u) return showToast('Введите username', 'error');
+  adminGrantPROTo(u);
+}
+
+function adminRemovePRO() {
+  var u = document.getElementById('admin-quick-user').value.trim().toLowerCase();
+  if (!u) return showToast('Введите username', 'error');
+  adminRemovePROFrom(u);
+}
+
+function adminBanUser() {
+  var u = document.getElementById('admin-quick-user').value.trim().toLowerCase();
+  if (!u) return showToast('Введите username', 'error');
+  if (!confirm('Забанить @' + u + '?')) return;
+  fetch(API + '/admin/' + adminSecret + '/ban/' + u, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '🚫 @' + u + ' забанен' : '❌ ' + d.error, d.success ? 'success' : 'error');
+    loadAdminData();
+  });
+}
+
+function adminUnbanUser() {
+  var u = document.getElementById('admin-quick-user').value.trim().toLowerCase();
+  if (!u) return showToast('Введите username', 'error');
+  fetch(API + '/admin/' + adminSecret + '/unban/' + u, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '✅ @' + u + ' разбанен' : '❌ ' + d.error, d.success ? 'success' : 'error');
+    loadAdminData();
+  });
+}
+
+function adminResetPassword() {
+  var u = document.getElementById('admin-reset-user').value.trim().toLowerCase();
+  var p = document.getElementById('admin-reset-pass').value;
+  if (!u || !p) return showToast('Заполните оба поля', 'error');
+  fetch(API + '/admin/' + adminSecret + '/resetpass/' + u + '/' + p, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '🔑 Пароль сброшен' : '❌ ' + d.error, d.success ? 'success' : 'error');
+  });
+}
+
+function adminDeleteUser() {
+  var u = document.getElementById('admin-delete-user').value.trim().toLowerCase();
+  if (!u) return showToast('Введите username', 'error');
+  if (!confirm('⚠️ УДАЛИТЬ аккаунт @' + u + '? Это необратимо!')) return;
+  fetch(API + '/admin/' + adminSecret + '/delete-user/' + u, { method: 'POST' }).then(function(r) { return r.json(); }).then(function(d) {
+    showToast(d.success ? '🗑️ @' + u + ' удалён' : '❌ ' + d.error, d.success ? 'success' : 'error');
+    loadAdminData();
+  });
+}
+
+function scrollToMsg(msgId) {
+  var el = document.querySelector('[data-msg-id="' + msgId + '"]');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.style.background = 'rgba(124,58,237,.2)';
+    setTimeout(function() { el.style.background = ''; }, 1500);
+  }
 }
 
 // ===== EMOJI =====
