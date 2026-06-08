@@ -122,6 +122,20 @@
           <div class="typing-dots"><span></span><span></span><span></span></div>
           <span id="typing-name">Someone</span> <span data-i18n="typing">печатает...</span>
         </div>
+        <div class="reply-bar hidden" id="reply-bar">
+          <div class="reply-bar-content">
+            <span class="reply-bar-label">↩️ <span id="reply-bar-name">User</span></span>
+            <span class="reply-bar-text" id="reply-bar-text"></span>
+          </div>
+          <button class="reply-bar-close" id="reply-bar-close">✕</button>
+        </div>
+        <div class="edit-bar hidden" id="edit-bar">
+          <div class="edit-bar-content">
+            <span class="edit-bar-label">✏️ Редактирование</span>
+            <span class="edit-bar-text" id="edit-bar-text"></span>
+          </div>
+          <button class="reply-bar-close" id="edit-bar-close">✕</button>
+        </div>
         <div class="message-input-area" id="message-input-area">
           <button class="btn-icon" id="btn-emoji" title="Эмодзи">😀</button>
           <button class="btn-icon" id="btn-attach" title="Файл">📎</button>
@@ -337,11 +351,79 @@
     </div>
   </div>
 
+  <!-- ADMIN PANEL -->
+  <div class="modal-overlay hidden" id="admin-modal">
+    <div class="modal admin-panel-modal">
+      <div class="modal-header">
+        <h2>🛡️ Панель администратора</h2>
+        <button class="btn-close" id="close-admin">✕</button>
+      </div>
+      <div class="modal-body admin-body">
+        <!-- Admin Login -->
+        <div id="admin-login-section">
+          <div class="admin-lock">
+            <div class="admin-lock-icon">🔐</div>
+            <p>Введите секретный ключ администратора</p>
+            <div class="input-group" style="max-width:320px;margin:12px auto">
+              <span class="input-icon">🔑</span>
+              <input type="password" id="admin-secret-input" placeholder="Секретный ключ...">
+            </div>
+            <button class="btn-primary" id="btn-admin-login" style="margin-top:8px">🔓 Войти</button>
+          </div>
+        </div>
+        <!-- Admin Dashboard -->
+        <div id="admin-dashboard" class="hidden">
+          <div class="admin-stats" id="admin-stats"></div>
+          <div class="admin-section">
+            <h3>👥 Пользователи</h3>
+            <div class="admin-search-row">
+              <input type="text" id="admin-user-search" placeholder="Поиск пользователя...">
+            </div>
+            <div class="admin-user-list" id="admin-user-list"></div>
+          </div>
+          <div class="admin-section">
+            <h3>💎 PRO запросы</h3>
+            <div id="admin-pro-requests" class="admin-user-list"></div>
+          </div>
+          <div class="admin-section">
+            <h3>🚨 Жалобы</h3>
+            <div id="admin-reports" class="admin-user-list"></div>
+          </div>
+          <div class="admin-section">
+            <h3>⚡ Быстрые действия</h3>
+            <div class="admin-quick-actions">
+              <div class="admin-action-row">
+                <input type="text" id="admin-quick-user" placeholder="@username">
+                <button class="btn-primary" onclick="adminGrantPRO()">💎 PRO</button>
+                <button class="btn-secondary" onclick="adminRemovePRO()">❌ Снять PRO</button>
+                <button class="btn-danger" onclick="adminBanUser()">🚫 Бан</button>
+                <button class="btn-secondary" onclick="adminUnbanUser()">✅ Разбан</button>
+              </div>
+              <div class="admin-action-row">
+                <input type="text" id="admin-reset-user" placeholder="@username">
+                <input type="text" id="admin-reset-pass" placeholder="Новый пароль">
+                <button class="btn-primary" onclick="adminResetPassword()">🔑 Сброс пароля</button>
+              </div>
+              <div class="admin-action-row">
+                <input type="text" id="admin-delete-user" placeholder="@username для удаления">
+                <button class="btn-danger" onclick="adminDeleteUser()">🗑️ Удалить аккаунт</button>
+              </div>
+            </div>
+          </div>
+          <div class="admin-section">
+            <h3>📊 Лог активности</h3>
+            <div class="admin-activity-log" id="admin-activity"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast-container" id="toast-container"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/app.js"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0894588ea2ceeb1',t:'MTc4MDkzNjEyNg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
