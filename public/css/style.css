@@ -606,10 +606,10 @@ body{
 
 /* ── REACTION PICKER ──────────────────────────────────────────── */
 .reaction-picker{
-  position:absolute;
+  position:fixed;
   background:var(--bg-glass-heavy);backdrop-filter:blur(20px);
   border:1px solid var(--border-light);border-radius:var(--radius-full);
-  padding:6px 10px;display:flex;gap:4px;z-index:200;
+  padding:6px 10px;display:flex;gap:4px;z-index:500;
   box-shadow:var(--shadow-lg)
 }
 .reaction-btn{
