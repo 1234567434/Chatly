@@ -150,9 +150,42 @@ function setupEventListeners() {
   // Save profile
   document.getElementById('btn-save-profile').addEventListener('click', saveProfile);
 
-  // Avatar preview
+  // Avatar emoji change
   document.getElementById('avatar-select').addEventListener('change', function() {
-    document.getElementById('settings-avatar').textContent = this.value;
+    if (this.value) {
+      document.getElementById('settings-avatar').innerHTML = this.value;
+    }
+  });
+
+  // Avatar photo upload
+  document.getElementById('avatar-file-input').addEventListener('change', async function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast('❌ Только картинки', 'error'); return; }
+    if (file.size > 10 * 1024 * 1024) { showToast('❌ Макс. 10МБ', 'error'); return; }
+    e.target.value = '';
+
+    var fd = new FormData();
+    fd.append('file', file);
+    try {
+      var res = await fetch(API + '/api/upload', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: fd });
+      if (!res.ok) { showToast('❌ Ошибка загрузки', 'error'); return; }
+      var fi = await res.json();
+      // Save avatar URL to profile
+      var pres = await fetch(API + '/api/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ avatar: fi.url })
+      });
+      currentUser = await pres.json();
+      // Show image preview
+      document.getElementById('settings-avatar').innerHTML = '<img src="' + fi.url + '" alt="avatar">';
+      document.getElementById('avatar-select').value = '';
+      updateUI();
+      showToast('✅ Аватарка обновлена!', 'success');
+    } catch (err) {
+      showToast('❌ Ошибка', 'error');
+    }
   });
 
   // Themes
@@ -266,14 +299,28 @@ function handleLogin(data) {
 async function loadApp() {
   try {
     var res = await fetch(API + '/api/me', { headers: { 'Authorization': 'Bearer ' + token } });
-    if (!res.ok) { logout(); return; }
+    if (!res.ok) {
+      // Token might be expired or server restarted — try retry once
+      if (res.status === 403 || res.status === 401) {
+        console.log('Token invalid, clearing...');
+        token = null;
+        localStorage.removeItem('chatly_token');
+        showAuth();
+        return;
+      }
+      // Server error — don't logout, just retry later
+      console.log('Server error, will retry...');
+      return;
+    }
     currentUser = await res.json();
     updateUI();
     connectSocket();
     loadUsers();
     loadGroups();
   } catch (err) {
-    logout();
+    // Network error (server sleeping?) — don't logout, keep token
+    console.log('Network error, keeping token for retry');
+    showApp();
   }
 }
 
@@ -281,20 +328,25 @@ async function loadApp() {
 function updateUI() {
   if (!currentUser) return;
   var av = currentUser.avatar || '😎';
+  var isAvatarUrl = av && av.startsWith('/uploads/');
+
+  // Helper: render avatar content
+  function renderAvatar(el) {
+    if (!el) return;
+    if (isAvatarUrl) { el.innerHTML = '<img src="' + av + '" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'; }
+    else { el.innerHTML = ''; el.textContent = av; }
+  }
 
   // Sidebar footer
-  document.getElementById('my-avatar').textContent = av;
+  renderAvatar(document.getElementById('my-avatar'));
   document.getElementById('my-name').textContent = currentUser.displayName;
   var proBadge = document.getElementById('my-pro-badge');
-  if (currentUser.isPro) {
-    proBadge.classList.remove('hidden');
-  } else {
-    proBadge.classList.add('hidden');
-  }
+  if (currentUser.isPro) proBadge.classList.remove('hidden');
+  else proBadge.classList.add('hidden');
 
   // Settings profile
   var settingsAvatar = document.getElementById('settings-avatar');
-  if (settingsAvatar) settingsAvatar.textContent = av;
+  if (settingsAvatar) renderAvatar(settingsAvatar);
   var editDisplayName = document.getElementById('edit-displayname');
   if (editDisplayName) editDisplayName.value = currentUser.displayName || '';
   var editBio = document.getElementById('edit-bio');
@@ -302,7 +354,8 @@ function updateUI() {
   var editUsername = document.getElementById('edit-username');
   if (editUsername) editUsername.value = currentUser.username || '';
   var avatarSelect = document.getElementById('avatar-select');
-  if (avatarSelect && currentUser.avatar) avatarSelect.value = currentUser.avatar;
+  if (avatarSelect && currentUser.avatar && !isAvatarUrl) avatarSelect.value = currentUser.avatar;
+  else if (avatarSelect) avatarSelect.value = '';
 
   // Apply theme
   if (currentUser.theme && currentUser.theme !== 'default') {
@@ -317,6 +370,9 @@ function updateUI() {
   } else {
     document.documentElement.style.removeProperty('--msg-font');
   }
+
+  // Update chat header avatar if in DM
+  updateChatHeader();
 
   updateProStatus();
   updateThemeGrid();
@@ -468,6 +524,22 @@ function connectSocket() {
     renderDMContacts();
   });
 
+  // When another user updates their profile (avatar, name, etc.)
+  socket.on('user:profileUpdate', function(updatedUser) {
+    console.log('👤 Profile update:', updatedUser.username);
+    // Update in allUsers array
+    var idx = allUsers.findIndex(function(u) { return u.username === updatedUser.username; });
+    if (idx >= 0) {
+      allUsers[idx] = updatedUser;
+    }
+    renderDMContacts();
+    renderGroupContacts();
+    // Update chat header if viewing this user
+    if (activeChat === updatedUser.username && activeChatType === 'dm') {
+      updateChatHeader();
+    }
+  });
+
   // ===== Typing =====
   socket.on('user:typing', function(data) {
     if (activeChat === data.from && activeChatType === 'dm') {
@@ -571,6 +643,8 @@ function connectSocket() {
     console.log('💎 PRO granted!');
     currentUser = user;
     updateUI();
+    renderDMContacts();
+    renderGroupContacts();
     showToast(t('pro_granted_toast'), 'success');
   });
 
@@ -578,6 +652,8 @@ function connectSocket() {
     console.log('🔻 PRO removed');
     currentUser = user;
     updateUI();
+    renderDMContacts();
+    renderGroupContacts();
     showToast(t('pro_removed_toast'), 'info');
   });
 }
@@ -628,7 +704,7 @@ function renderDMContacts() {
     var isActive = activeChat === u.username && activeChatType === 'dm';
 
     var html = '<div class="contact-item' + (isActive ? ' active' : '') + '" onclick="openDM(\'' + u.username + '\')">';
-    html += '<div class="avatar">' + (u.avatar || '😎') + '</div>';
+    html += '<div class="avatar">' + renderAvatarHTML(u.avatar) + '</div>';
     html += '<div class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></div>';
     html += '<div class="contact-info">';
     html += '<div class="contact-name-row">';
@@ -727,10 +803,18 @@ function updateChatHeader() {
   var audioCallBtn = document.getElementById('btn-audio-call');
   var videoCallBtn = document.getElementById('btn-video-call');
 
+  if (!avatarEl || !activeChat) return;
+
   if (activeChatType === 'dm') {
     var user = allUsers.find(function(u) { return u.username === activeChat; });
     if (user) {
-      avatarEl.textContent = user.avatar || '😎';
+      var av = user.avatar || '😎';
+      if (av.startsWith('/uploads/')) {
+        avatarEl.innerHTML = '<img src="' + av + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      } else {
+        avatarEl.innerHTML = '';
+        avatarEl.textContent = av;
+      }
       nameEl.textContent = user.displayName;
       if (user.isPro) nameEl.textContent += ' 💎';
       var isOnline = onlineUsers.has(activeChat);
@@ -743,6 +827,7 @@ function updateChatHeader() {
   } else if (activeChatType === 'group') {
     var group = userGroups.find(function(g) { return g.id === activeChat; });
     if (group) {
+      avatarEl.innerHTML = '';
       avatarEl.textContent = group.avatar || '💬';
       nameEl.textContent = group.name;
       var memberCount = group.members ? group.members.length : 0;
@@ -824,7 +909,15 @@ function buildMsgHTML(msg, type) {
   }
 
   var html = '<div class="message' + (isOwn ? ' own' : '') + '" data-msg-id="' + msg.id + '">';
-  html += '<div class="msg-avatar">' + (user ? (user.avatar || '😎') : '😎') + '</div>';
+  var avContent = '😎';
+  if (user && user.avatar) {
+    if (user.avatar.startsWith('/uploads/')) {
+      avContent = '<img src="' + user.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    } else {
+      avContent = user.avatar;
+    }
+  }
+  html += '<div class="msg-avatar">' + avContent + '</div>';
   html += '<div class="msg-content">';
   html += '<div class="msg-header">';
   html += '<span class="msg-sender">' + esc(name) + '</span>';
@@ -1241,7 +1334,7 @@ function openCreateGroup() {
   var picker = document.getElementById('member-picker');
   picker.innerHTML = allUsers.map(function(u) {
     return '<div class="member-pick-item" data-username="' + u.username + '" onclick="this.classList.toggle(\'selected\')">' +
-      '<div class="avatar">' + (u.avatar || '😎') + '</div>' +
+      '<div class="avatar">' + renderAvatarHTML(u.avatar) + '</div>' +
       esc(u.displayName) + '</div>';
   }).join('');
 }
@@ -1393,7 +1486,7 @@ function renderGroupInfo(g) {
     html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
     available.forEach(function(u) {
       html += '<button class="member-pick-item" onclick="addMemberToGroup(\'' + g.id + '\',\'' + u.username + '\',this)">';
-      html += '<div class="avatar">' + (u.avatar || '😎') + '</div>' + esc(u.displayName) + ' ＋</button>';
+      html += '<div class="avatar">' + renderAvatarHTML(u.avatar) + '</div>' + esc(u.displayName) + ' ＋</button>';
     });
     html += '</div></div>';
   }
@@ -1969,6 +2062,13 @@ function logout() {
 }
 
 // ===== UTILITIES =====
+function renderAvatarHTML(avatar) {
+  if (avatar && avatar.startsWith('/uploads/')) {
+    return '<img src="' + avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+  }
+  return avatar || '😎';
+}
+
 function esc(s) {
   if (!s) return '';
   var d = document.createElement('div');
