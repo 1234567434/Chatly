@@ -186,15 +186,20 @@
         <div class="settings-content active" id="stab-profile">
           <div class="profile-edit">
             <div class="profile-avatar-edit">
-              <div class="avatar avatar-lg" id="settings-avatar"></div>
-              <select id="avatar-select" class="avatar-select">
-                <option value="😎">😎</option><option value="🦊">🦊</option><option value="🐱">🐱</option>
-                <option value="🐶">🐶</option><option value="🦁">🦁</option><option value="🐸">🐸</option>
-                <option value="🐼">🐼</option><option value="🦋">🦋</option><option value="🌸">🌸</option>
-                <option value="⭐">⭐</option><option value="🎮">🎮</option><option value="🚀">🚀</option>
-                <option value="👑">👑</option><option value="🎯">🎯</option><option value="🎵">🎵</option>
-                <option value="🔮">🔮</option>
-              </select>
+              <div class="avatar avatar-lg" id="settings-avatar">😎</div>
+              <div class="avatar-upload-row">
+                <select id="avatar-select" class="avatar-select">
+                  <option value="">— Эмодзи —</option>
+                  <option value="😎">😎</option><option value="🦊">🦊</option><option value="🐱">🐱</option>
+                  <option value="🐶">🐶</option><option value="🦁">🦁</option><option value="🐸">🐸</option>
+                  <option value="🐼">🐼</option><option value="🦋">🦋</option><option value="🌸">🌸</option>
+                  <option value="⭐">⭐</option><option value="🎮">🎮</option><option value="🚀">🚀</option>
+                  <option value="👑">👑</option><option value="🎯">🎯</option><option value="🎵">🎵</option>
+                  <option value="🔮">🔮</option>
+                </select>
+                <label class="avatar-photo-btn" for="avatar-file-input">📷 Фото</label>
+                <input type="file" id="avatar-file-input" accept="image/*" hidden>
+              </div>
             </div>
             <div class="form-group"><label data-i18n="label_name">Имя</label><input type="text" id="edit-displayname"></div>
             <div class="form-group"><label data-i18n="label_bio">О себе</label><textarea id="edit-bio" rows="3"></textarea></div>
@@ -338,5 +343,5 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/i18n.js"></script>
   <script src="js/app.js"></script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a082a761ba1aeeb9',t:'MTc4MDg2NjczNA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
