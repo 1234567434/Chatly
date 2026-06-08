@@ -308,8 +308,13 @@ app.post('/api/register', function(req, res) {
     return res.status(400).json({ error: 'Username can only contain letters, numbers, and underscores' });
   }
 
-  // Check if username taken
-  if (db.users[un]) {
+  // Check if username taken (double check for race conditions)
+  if (db.users[un] || db.users[un.toLowerCase()]) {
+    return res.status(400).json({ error: 'Username is already taken' });
+  }
+  // Also check case-insensitive across ALL existing users
+  var existingNames = Object.keys(db.users).map(function(k) { return k.toLowerCase(); });
+  if (existingNames.indexOf(un.toLowerCase()) !== -1) {
     return res.status(400).json({ error: 'Username is already taken' });
   }
 
@@ -1816,6 +1821,9 @@ app.post('/admin/' + ADMIN_SECRET + '/pro/:username', function(req, res) {
   var target = req.params.username.toLowerCase();
   if (!db.users[target]) {
     return res.status(404).json({ error: 'User not found' });
+  }
+  if (db.users[target].isPro) {
+    return res.status(400).json({ error: 'User @' + target + ' already has PRO' });
   }
 
   db.users[target].isPro = true;
