@@ -7,6 +7,7 @@ var unreadCounts = {}, lastMessages = {}, onlineUsers = new Set();
 var proRequestPending = false, allUsers = [], userGroups = [];
 var voiceRecorder = null, voiceChunks = [], voiceStartTime = 0, voiceTimerInterval = null;
 var peerConnection = null, localStream = null, callPartner = null, callTimerInterval = null, callStartTime = 0;
+var _initialConnect = true;
 
 // ===== EMOJI DATA =====
 var EMOJIS = {
@@ -42,6 +43,7 @@ var ICE_SERVERS = [
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', function() {
   if (token) {
+    showApp();
     loadApp();
   } else {
     showAuth();
@@ -177,14 +179,22 @@ function setupEventListeners() {
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify({ avatar: fi.url })
       });
+      if (!pres.ok) { showToast('❌ Ошибка сохранения', 'error'); return; }
       currentUser = await pres.json();
-      // Show image preview
-      document.getElementById('settings-avatar').innerHTML = '<img src="' + fi.url + '" alt="avatar">';
+      // Update UI everywhere
+      document.getElementById('settings-avatar').innerHTML = '<img src="' + fi.url + '" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
       document.getElementById('avatar-select').value = '';
       updateUI();
+      renderDMContacts();
+      renderGroupContacts();
+      // Re-render messages if in a chat so own avatar updates
+      if (activeChat) {
+        if (activeChatType === 'dm') loadMessages(activeChat);
+        else loadGroupMessages(activeChat);
+      }
       showToast('✅ Аватарка обновлена!', 'success');
     } catch (err) {
-      showToast('❌ Ошибка', 'error');
+      showToast('❌ Ошибка: ' + err.message, 'error');
     }
   });
 
@@ -292,6 +302,7 @@ function handleLogin(data) {
   token = data.token;
   currentUser = data.user;
   localStorage.setItem('chatly_token', token);
+  _initialConnect = true;
   showApp();
   loadApp();
 }
@@ -314,6 +325,7 @@ async function loadApp() {
     }
     currentUser = await res.json();
     updateUI();
+    _initialConnect = true;
     connectSocket();
     loadUsers();
     loadGroups();
@@ -448,6 +460,18 @@ function connectSocket() {
 
   socket.on('connect', function() {
     console.log('🔌 Socket connected');
+    if (_initialConnect) {
+      _initialConnect = false;
+    } else {
+      // Reconnection — refresh all data to stay in sync
+      console.log('🔄 Reconnected — refreshing data');
+      loadUsers();
+      loadGroups();
+      if (activeChat) {
+        if (activeChatType === 'dm') loadMessages(activeChat);
+        else loadGroupMessages(activeChat);
+      }
+    }
   });
 
   socket.on('disconnect', function() {
@@ -527,16 +551,33 @@ function connectSocket() {
   // When another user updates their profile (avatar, name, etc.)
   socket.on('user:profileUpdate', function(updatedUser) {
     console.log('👤 Profile update:', updatedUser.username);
+    // Update currentUser if this is about self
+    if (currentUser && updatedUser.username === currentUser.username) {
+      currentUser = updatedUser;
+      updateUI();
+    }
     // Update in allUsers array
     var idx = allUsers.findIndex(function(u) { return u.username === updatedUser.username; });
     if (idx >= 0) {
       allUsers[idx] = updatedUser;
+    } else {
+      // User not in allUsers list — might be a new registration that came through profile update
+      allUsers.push(updatedUser);
     }
     renderDMContacts();
     renderGroupContacts();
     // Update chat header if viewing this user
     if (activeChat === updatedUser.username && activeChatType === 'dm') {
       updateChatHeader();
+    }
+    // Re-render current messages to show updated avatar/name
+    if (activeChat && activeChatType === 'dm') {
+      // Update message avatars in real-time without full reload
+      document.querySelectorAll('.message .msg-avatar').forEach(function(el) {
+        var msgEl = el.closest('.message');
+        if (!msgEl) return;
+        // We don't know the username from DOM, so we just update if it matches the updated user
+      });
     }
   });
 
@@ -606,6 +647,75 @@ function connectSocket() {
   socket.on('group:removed', function(data) {
     console.log('➖ group:removed', data);
     loadGroups();
+    // If currently viewing this group, go back to empty state
+    if (activeChat === data.groupId && activeChatType === 'group') {
+      activeChat = null;
+      document.getElementById('active-chat').classList.add('hidden');
+      document.getElementById('empty-state').classList.remove('hidden');
+      document.getElementById('sidebar').classList.remove('mobile-hidden');
+    }
+  });
+
+  // ===== Group Real-time Updates =====
+  socket.on('group:updated', function(data) {
+    console.log('🔄 group:updated', data.groupId);
+    loadGroups();
+    if (activeChat === data.groupId && activeChatType === 'group') {
+      updateChatHeader();
+    }
+  });
+
+  socket.on('group:reaction', function(data) {
+    console.log('😍 group:reaction', data.groupId);
+    if (activeChat === data.groupId && activeChatType === 'group') {
+      loadGroupMessages(activeChat);
+    }
+    renderGroupContacts();
+  });
+
+  socket.on('group:pinUpdate', function(data) {
+    console.log('📌 group:pinUpdate', data.groupId);
+    if (activeChat === data.groupId && activeChatType === 'group') {
+      loadGroupMessages(activeChat);
+      if (data.msg) updatePinnedMessage(data.msg);
+    }
+  });
+
+  socket.on('group:messageDeleted', function(data) {
+    console.log('🗑️ group:messageDeleted', data.msgId);
+    if (activeChat === data.groupId && activeChatType === 'group') {
+      var el = document.querySelector('[data-msg-id="' + data.msgId + '"]');
+      if (el) {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.3s';
+        setTimeout(function() { el.remove(); }, 300);
+      }
+    }
+  });
+
+  // ===== New User Registered =====
+  socket.on('user:registered', function(newUser) {
+    console.log('🆕 user:registered', newUser.username);
+    if (currentUser && newUser.username !== currentUser.username) {
+      // Check not already in list
+      var exists = allUsers.some(function(u) { return u.username === newUser.username; });
+      if (!exists) {
+        allUsers.push(newUser);
+        renderDMContacts();
+        showToast('🆕 ' + newUser.displayName + ' присоединился!', 'info');
+      }
+    }
+  });
+
+  // ===== Account Events =====
+  socket.on('account:banned', function(data) {
+    showToast('🚫 Аккаунт заблокирован: ' + (data.reason || ''), 'error');
+    setTimeout(logout, 2000);
+  });
+
+  socket.on('account:deleted', function() {
+    showToast('🚫 Аккаунт удалён администратором', 'error');
+    setTimeout(logout, 2000);
   });
 
   // ===== WebRTC Calls =====
@@ -702,9 +812,10 @@ function renderDMContacts() {
     var lastMsg = lastMessages[u.username];
     var unread = unreadCounts[u.username] || 0;
     var isActive = activeChat === u.username && activeChatType === 'dm';
+    var avHtml = renderAvatarHTML(u.avatar);
 
     var html = '<div class="contact-item' + (isActive ? ' active' : '') + '" onclick="openDM(\'' + u.username + '\')">';
-    html += '<div class="avatar">' + renderAvatarHTML(u.avatar) + '</div>';
+    html += '<div class="avatar">' + avHtml + '</div>';
     html += '<div class="status-dot ' + (isOnline ? 'online' : 'offline') + '"></div>';
     html += '<div class="contact-info">';
     html += '<div class="contact-name-row">';
@@ -712,7 +823,14 @@ function renderDMContacts() {
     if (u.isPro) html += '<span class="contact-pro-badge">💎 PRO</span>';
     html += '</div>';
     if (lastMsg) {
-      html += '<div class="contact-last-msg">' + esc(lastMsg.text || t('msg_file')).substring(0, 40) + '</div>';
+      var preview = lastMsg.text || t('msg_file');
+      if (lastMsg.type === 'voice') preview = '🎙️ ' + t('voice_msg');
+      else if (lastMsg.type === 'file' && lastMsg.fileInfo) {
+        if (lastMsg.fileInfo.mimetype && lastMsg.fileInfo.mimetype.startsWith('image/')) preview = '🖼️ Фото';
+        else if (lastMsg.fileInfo.mimetype && lastMsg.fileInfo.mimetype.startsWith('video/')) preview = '🎬 Видео';
+        else preview = '📎 ' + (lastMsg.fileInfo.originalName || t('msg_file'));
+      }
+      html += '<div class="contact-last-msg">' + esc(preview).substring(0, 40) + '</div>';
     }
     html += '</div>';
     html += '<div class="contact-meta">';
@@ -749,6 +867,11 @@ function renderGroupContacts() {
       html += '</div>';
       if (lastMsg) {
         var preview = lastMsg.text || t('msg_file');
+        if (lastMsg.type === 'voice') preview = '🎙️ ' + t('voice_msg');
+        else if (lastMsg.type === 'file' && lastMsg.fileInfo) {
+          if (lastMsg.fileInfo.mimetype && lastMsg.fileInfo.mimetype.startsWith('image/')) preview = '🖼️ Фото';
+          else preview = '📎 Файл';
+        }
         if (lastMsg.from) preview = getDisplayName(lastMsg.from) + ': ' + preview;
         html += '<div class="contact-last-msg">' + esc(preview).substring(0, 40) + '</div>';
       } else {
@@ -910,7 +1033,14 @@ function buildMsgHTML(msg, type) {
 
   var html = '<div class="message' + (isOwn ? ' own' : '') + '" data-msg-id="' + msg.id + '">';
   var avContent = '😎';
-  if (user && user.avatar) {
+  // Check current user first (they are NOT in allUsers array)
+  if (isOwn && currentUser && currentUser.avatar) {
+    if (currentUser.avatar.startsWith('/uploads/')) {
+      avContent = '<img src="' + currentUser.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    } else {
+      avContent = currentUser.avatar;
+    }
+  } else if (user && user.avatar) {
     if (user.avatar.startsWith('/uploads/')) {
       avContent = '<img src="' + user.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
     } else {
@@ -1564,6 +1694,9 @@ async function leaveGroup(gid) {
 }
 
 // ===== WEBRTC CALLS =====
+// ICE candidate buffer — stores candidates until peer connection is ready
+var _pendingICE = [];
+
 function startCall(callType) {
   if (!activeChat || activeChatType !== 'dm') {
     return showToast(t('calls_dm_only'), 'info');
@@ -1571,9 +1704,15 @@ function startCall(callType) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     return showToast(t('no_camera'), 'error');
   }
+  // Prevent double calls
+  if (peerConnection || callPartner) {
+    endCallUI();
+  }
 
   callPartner = activeChat;
-  var user = allUsers.find(function(u) { return u.username === callPartner; });
+  _pendingICE = [];
+  var savedPartner = callPartner;
+  var user = allUsers.find(function(u) { return u.username === savedPartner; });
   var isPro = currentUser && currentUser.isPro;
 
   var constraints = callType === 'video'
@@ -1582,6 +1721,8 @@ function startCall(callType) {
 
   navigator.mediaDevices.getUserMedia(constraints)
     .then(function(stream) {
+      if (callPartner !== savedPartner) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+
       localStream = stream;
       peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -1590,35 +1731,42 @@ function startCall(callType) {
       });
 
       peerConnection.ontrack = function(e) {
+        console.log('📺 Got remote track');
         document.getElementById('remote-video').srcObject = e.streams[0];
         document.getElementById('call-no-video').classList.add('hidden');
       };
 
       peerConnection.onicecandidate = function(e) {
-        if (e.candidate) {
+        if (e.candidate && callPartner) {
           socket.emit('call:ice-candidate', { to: callPartner, candidate: e.candidate });
         }
       };
 
       peerConnection.oniceconnectionstatechange = function() {
-        if (peerConnection && (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected')) {
-          endCallUI(t('call_ended'));
+        if (!peerConnection) return;
+        var state = peerConnection.iceConnectionState;
+        console.log('ICE state:', state);
+        if (state === 'failed' || state === 'disconnected') {
+          setTimeout(function() {
+            if (peerConnection) endCallUI(t('call_ended'));
+          }, 1500);
         }
       };
 
       return peerConnection.createOffer();
     })
     .then(function(offer) {
+      if (!offer) return;
       return peerConnection.setLocalDescription(offer);
     })
     .then(function() {
+      if (!peerConnection) return;
       socket.emit('call:offer', {
-        to: callPartner,
+        to: savedPartner,
         offer: peerConnection.localDescription,
         callType: callType,
         quality: isPro ? 'hd' : 'sd'
       });
-
       showCallOverlay(callType, user);
       showToast(t('call_connecting'), 'info');
     })
@@ -1630,12 +1778,17 @@ function startCall(callType) {
 }
 
 function handleIncomingCall(data) {
-  console.log('📞 Incoming from', data.from);
+  console.log('Incoming call from', data.from);
+  if (peerConnection) {
+    socket.emit('call:reject', { to: data.from });
+    return;
+  }
+
+  _pendingICE = [];
   callPartner = data.from;
   window._incomingOffer = data.offer;
   window._incomingCallType = data.callType;
 
-  // Show incoming call UI
   document.getElementById('call-overlay').classList.remove('hidden');
   document.getElementById('call-incoming').classList.remove('hidden');
   var cc = document.getElementById('call-controls');
@@ -1644,17 +1797,28 @@ function handleIncomingCall(data) {
   if (pip) pip.classList.add('hidden');
   document.getElementById('call-timer').textContent = '';
 
-  document.getElementById('incoming-avatar').textContent = data.avatar || '😎';
   document.getElementById('incoming-name').textContent = data.displayName;
   document.getElementById('incoming-type').textContent = data.callType === 'video' ? t('call_video') : t('call_audio');
+  var avEl = document.getElementById('incoming-avatar');
+  if (avEl) {
+    if (data.avatar && data.avatar.startsWith('/uploads/')) {
+      avEl.innerHTML = '<img src="' + data.avatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    } else {
+      avEl.innerHTML = '';
+      avEl.textContent = data.avatar || '😎';
+    }
+  }
 }
 
 function acceptCall() {
-  console.log('📞 Accept');
+  console.log('Accept call');
+  if (!callPartner || !window._incomingOffer) { endCallUI(); return; }
+
   document.getElementById('call-incoming').classList.add('hidden');
   var cc = document.getElementById('call-controls');
   if (cc) cc.style.display = '';
 
+  var savedPartner = callPartner;
   var callType = window._incomingCallType || 'audio';
   var isPro = currentUser && currentUser.isPro;
 
@@ -1664,6 +1828,8 @@ function acceptCall() {
 
   navigator.mediaDevices.getUserMedia(constraints)
     .then(function(stream) {
+      if (callPartner !== savedPartner) { stream.getTracks().forEach(function(t) { t.stop(); }); return; }
+
       localStream = stream;
       peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
@@ -1672,31 +1838,46 @@ function acceptCall() {
       });
 
       peerConnection.ontrack = function(e) {
+        console.log('Got remote track');
         document.getElementById('remote-video').srcObject = e.streams[0];
         document.getElementById('call-no-video').classList.add('hidden');
       };
 
       peerConnection.onicecandidate = function(e) {
-        if (e.candidate) {
+        if (e.candidate && callPartner) {
           socket.emit('call:ice-candidate', { to: callPartner, candidate: e.candidate });
         }
       };
 
       peerConnection.oniceconnectionstatechange = function() {
-        if (peerConnection && (peerConnection.iceConnectionState === 'failed' || peerConnection.iceConnectionState === 'disconnected')) {
-          endCallUI('Connection lost');
+        if (!peerConnection) return;
+        var state = peerConnection.iceConnectionState;
+        console.log('ICE state:', state);
+        if (state === 'failed' || state === 'disconnected') {
+          setTimeout(function() {
+            if (peerConnection) endCallUI(t('call_ended'));
+          }, 1500);
         }
       };
 
       return peerConnection.setRemoteDescription(window._incomingOffer);
     })
     .then(function() {
+      if (!peerConnection) return;
+      // Flush buffered ICE candidates
+      console.log('Flushing', _pendingICE.length, 'buffered ICE candidates');
+      _pendingICE.forEach(function(c) {
+        peerConnection.addIceCandidate(c).catch(function() {});
+      });
+      _pendingICE = [];
       return peerConnection.createAnswer();
     })
     .then(function(answer) {
+      if (!answer) return;
       return peerConnection.setLocalDescription(answer);
     })
     .then(function() {
+      if (!peerConnection) return;
       socket.emit('call:answer', { to: callPartner, answer: peerConnection.localDescription });
       var user = allUsers.find(function(u) { return u.username === callPartner; });
       updateCallAvatar(callType, user);
@@ -1710,32 +1891,47 @@ function acceptCall() {
 }
 
 function rejectCall() {
-  socket.emit('call:reject', { to: callPartner });
+  var partner = callPartner;
+  if (socket && partner) {
+    socket.emit('call:reject', { to: partner });
+  }
   endCallUI();
 }
 
 function handleCallAnswered(data) {
-  console.log('📞 Answered');
-  if (peerConnection) {
-    peerConnection.setRemoteDescription(data.answer)
-      .then(function() {
-        startCallTimer();
-      })
-      .catch(function(e) {
-        console.error('setRemote err:', e);
+  console.log('Call answered');
+  if (!peerConnection) { console.warn('No peerConnection for answer'); return; }
+  peerConnection.setRemoteDescription(data.answer)
+    .then(function() {
+      console.log('Remote description set');
+      // Flush buffered ICE candidates
+      console.log('Flushing', _pendingICE.length, 'buffered ICE candidates');
+      _pendingICE.forEach(function(c) {
+        peerConnection.addIceCandidate(c).catch(function() {});
       });
-  }
+      _pendingICE = [];
+      startCallTimer();
+    })
+    .catch(function(e) {
+      console.error('setRemote err:', e);
+    });
 }
 
 function handleRemoteICE(data) {
-  if (peerConnection && data.candidate) {
+  if (!data.candidate) return;
+  if (peerConnection && peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
     peerConnection.addIceCandidate(data.candidate).catch(function() {});
+  } else {
+    // Buffer — will flush after setRemoteDescription
+    console.log('Buffering ICE candidate');
+    _pendingICE.push(data.candidate);
   }
 }
 
 function hangupCall() {
-  if (socket && callPartner) {
-    socket.emit('call:hangup', { to: callPartner });
+  var partner = callPartner;
+  if (socket && partner) {
+    socket.emit('call:hangup', { to: partner });
   }
   endCallUI(t('call_ended'));
 }
@@ -1746,16 +1942,11 @@ function showCallOverlay(callType, user) {
   var cc = document.getElementById('call-controls');
   if (cc) cc.style.display = '';
   updateCallAvatar(callType, user);
-
   var isPro = currentUser && currentUser.isPro;
   var qualityEl = document.getElementById('call-quality');
   if (qualityEl) {
-    if (isPro) {
-      qualityEl.classList.remove('hidden');
-      qualityEl.textContent = '💎 HD';
-    } else {
-      qualityEl.classList.add('hidden');
-    }
+    if (isPro) { qualityEl.classList.remove('hidden'); qualityEl.textContent = '💎 HD'; }
+    else { qualityEl.classList.add('hidden'); }
   }
 }
 
@@ -1766,16 +1957,23 @@ function updateCallAvatar(callType, user) {
   } else {
     document.getElementById('call-pip').classList.add('hidden');
   }
-
+  var avEl = document.getElementById('call-avatar');
+  var av = user ? (user.avatar || '😎') : '😎';
+  if (av && av.startsWith('/uploads/')) {
+    avEl.innerHTML = '<img src="' + av + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+  } else {
+    avEl.innerHTML = '';
+    avEl.textContent = av;
+  }
+  document.getElementById('call-name').textContent = user ? user.displayName : (callPartner || 'User');
   if (callType !== 'video' || !localStream || !localStream.getVideoTracks().length) {
-    document.getElementById('call-avatar').textContent = user ? (user.avatar || '😎') : '😎';
-    document.getElementById('call-name').textContent = user ? user.displayName : (callPartner || 'User');
     document.getElementById('call-no-video').classList.remove('hidden');
   }
 }
 
 function startCallTimer() {
   callStartTime = Date.now();
+  clearInterval(callTimerInterval);
   callTimerInterval = setInterval(function() {
     var s = Math.floor((Date.now() - callStartTime) / 1000);
     document.getElementById('call-timer').textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -1783,28 +1981,28 @@ function startCallTimer() {
 }
 
 function endCallUI(msg) {
-  // Stop local stream
-  if (localStream) {
-    localStream.getTracks().forEach(function(t) { t.stop(); });
-    localStream = null;
-  }
-  // Close peer connection
-  if (peerConnection) {
-    try { peerConnection.close(); } catch (e) {}
-    peerConnection = null;
-  }
+  console.log('endCallUI');
+  if (localStream) { localStream.getTracks().forEach(function(t) { t.stop(); }); localStream = null; }
+  if (peerConnection) { try { peerConnection.close(); } catch(e) {} peerConnection = null; }
   clearInterval(callTimerInterval);
+  _pendingICE = [];
 
-  // Reset UI
+  var rv = document.getElementById('remote-video'); if (rv) rv.srcObject = null;
+  var lv = document.getElementById('local-video'); if (lv) lv.srcObject = null;
+
   document.getElementById('call-overlay').classList.add('hidden');
   document.getElementById('call-incoming').classList.add('hidden');
-  var cc = document.getElementById('call-controls');
-  if (cc) cc.style.display = '';
-  document.getElementById('remote-video').srcObject = null;
-  document.getElementById('local-video').srcObject = null;
+  var cc = document.getElementById('call-controls'); if (cc) cc.style.display = 'none';
+  var pip = document.getElementById('call-pip'); if (pip) pip.classList.add('hidden');
   document.getElementById('call-timer').textContent = '0:00';
-  callPartner = null;
 
+  var micBtn = document.getElementById('btn-toggle-mic');
+  if (micBtn) { micBtn.textContent = '🎙️'; micBtn.classList.remove('muted'); }
+  var camBtn = document.getElementById('btn-toggle-cam');
+  if (camBtn) { camBtn.textContent = '📹'; camBtn.classList.remove('muted'); }
+
+  callPartner = null;
+  callStartTime = 0;
   if (msg) showToast(msg, 'info');
 }
 
@@ -1893,7 +2091,7 @@ function pinMsg(msgId) {
   if (activeChatType === 'dm') {
     socket.emit('message:pin', { to: activeChat, msgId: msgId });
   } else if (activeChatType === 'group') {
-    socket.emit('message:pin', { to: activeChat, msgId: msgId });
+    socket.emit('group:pin', { groupId: activeChat, msgId: msgId });
   }
 }
 
@@ -1967,6 +2165,15 @@ function closeSettings() {
 
 async function saveProfile() {
   try {
+    var avatarValue = document.getElementById('avatar-select').value;
+    // If no emoji selected and current avatar is a photo URL, preserve it
+    if (!avatarValue && currentUser.avatar && currentUser.avatar.startsWith('/uploads/')) {
+      avatarValue = currentUser.avatar;
+    }
+    // If no emoji and no photo, preserve current emoji avatar
+    if (!avatarValue && currentUser.avatar) {
+      avatarValue = currentUser.avatar;
+    }
     var res = await fetch(API + '/api/profile', {
       method: 'PUT',
       headers: {
@@ -1976,12 +2183,13 @@ async function saveProfile() {
       body: JSON.stringify({
         displayName: document.getElementById('edit-displayname').value.trim(),
         bio: document.getElementById('edit-bio').value.trim(),
-        avatar: document.getElementById('avatar-select').value
+        avatar: avatarValue || undefined
       })
     });
     currentUser = await res.json();
     updateUI();
     renderDMContacts();
+    renderGroupContacts();
     showToast(t('profile_saved'), 'success');
   } catch (err) {
     showToast(t('profile_error'), 'error');
