@@ -492,6 +492,14 @@ function connectSocket() {
 
   socket = io({ auth: { token: token } });
 
+  // Periodic user list refresh as safety net (every 30s)
+  clearInterval(window._userRefreshInterval);
+  window._userRefreshInterval = setInterval(function() {
+    if (token && currentUser) {
+      loadUsers();
+    }
+  }, 30000);
+
   socket.on('connect', function() {
     console.log('🔌 Socket connected');
     if (_initialConnect) {
@@ -591,11 +599,23 @@ function connectSocket() {
     } else {
       onlineUsers.delete(data.username);
     }
+    // If full user data provided, ensure they are in allUsers
+    if (data.user && currentUser && data.username !== currentUser.username) {
+      var idx = allUsers.findIndex(function(u) { return u.username === data.username; });
+      if (idx < 0) {
+        // New user not in our list — add them
+        allUsers.push(data.user);
+      } else {
+        // Update existing entry (name/avatar might have changed)
+        allUsers[idx] = data.user;
+      }
+    }
     // Update chat header if viewing this user
     if (activeChat === data.username && activeChatType === 'dm') {
       updateChatHeader();
     }
     renderDMContacts();
+    renderGroupContacts();
   });
 
   // When another user updates their profile (avatar, name, etc.)
@@ -746,11 +766,11 @@ function connectSocket() {
   socket.on('user:registered', function(newUser) {
     console.log('🆕 user:registered', newUser.username);
     if (currentUser && newUser.username !== currentUser.username) {
-      // Check not already in list
       var exists = allUsers.some(function(u) { return u.username === newUser.username; });
       if (!exists) {
         allUsers.push(newUser);
         renderDMContacts();
+        renderGroupContacts();
         showToast('🆕 ' + newUser.displayName + ' присоединился!', 'info');
       }
     }
@@ -2626,6 +2646,7 @@ function logout() {
   currentUser = null;
   activeChat = null;
   localStorage.removeItem('chatly_token');
+  clearInterval(window._userRefreshInterval);
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();
