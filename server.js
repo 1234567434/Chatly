@@ -1468,8 +1468,9 @@ io.on('connection', function(socket) {
     user.lastSeen = new Date().toISOString();
   }
 
-  // Broadcast online status
-  io.emit('user:status', { username: username, status: 'online' });
+  // Broadcast online status WITH full user data
+  var userData = user ? sanitizeUser(user) : { username: username, status: 'online' };
+  io.emit('user:status', { username: username, status: 'online', user: userData });
 
   console.log('✅ @' + username + ' connected (' + onlineUsers.size + ' online)');
 
@@ -1861,7 +1862,9 @@ io.on('connection', function(socket) {
       db.users[username].lastSeen = new Date().toISOString();
     }
 
-    io.emit('user:status', { username: username, status: 'offline' });
+    var offUser = db.users[username];
+    var offData = offUser ? sanitizeUser(offUser) : { username: username, status: 'offline' };
+    io.emit('user:status', { username: username, status: 'offline', user: offData });
 
     console.log('❌ @' + username + ' disconnected (' + onlineUsers.size + ' online)');
 
