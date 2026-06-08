@@ -1,4 +1,4 @@
-  // ============================================================================
+// ============================================================================
 //  CHATLY MESSENGER v3.0 — FULL SERVER
 //  Express + Socket.IO + JWT Auth + SQLite-like JSON Storage
 //  Deploy-ready for Render.com (no readline, no process.exit, binds 0.0.0.0)
@@ -252,6 +252,7 @@ function sanitizeMessage(msg) {
     text: msg.text || '',
     type: msg.type || 'text',
     fileInfo: msg.fileInfo || null,
+    replyTo: msg.replyTo || null,
     time: msg.time,
     read: msg.read || false,
     reactions: msg.reactions || [],
@@ -835,8 +836,8 @@ app.put('/api/messages/:username/read', auth, function(req, res) {
  */
 app.put('/api/messages/:chatUser/react/:msgId', auth, function(req, res) {
   const u = db.users[req.user.username];
-  if (!u || !u.isPro) {
-    return res.status(403).json({ error: 'PRO feature only' });
+  if (!u) {
+    return res.status(403).json({ error: 'User not found' });
   }
 
   const chatId = getChatId(req.user.username, req.params.chatUser);
@@ -869,8 +870,8 @@ app.put('/api/messages/:chatUser/react/:msgId', auth, function(req, res) {
  */
 app.put('/api/messages/:chatUser/pin/:msgId', auth, function(req, res) {
   const u = db.users[req.user.username];
-  if (!u || !u.isPro) {
-    return res.status(403).json({ error: 'PRO feature only' });
+  if (!u) {
+    return res.status(403).json({ error: 'User not found' });
   }
 
   const chatId = getChatId(req.user.username, req.params.chatUser);
@@ -1494,6 +1495,7 @@ io.on('connection', function(socket) {
       text: text || '',
       type: type || 'text',
       fileInfo: fileInfo || null,
+      replyTo: data.replyTo || null,
       time: new Date().toISOString(),
       read: false,
       reactions: [],
@@ -1546,7 +1548,7 @@ io.on('connection', function(socket) {
   //  MESSAGE REACTIONS
   // -------------------------------------------------------
   socket.on('message:react', function(data) {
-    if (!db.users[username] || !db.users[username].isPro) return;
+    if (!db.users[username]) return;
 
     const chatId = getChatId(username, data.to);
     const msg = (db.messages[chatId] || []).find(function(m) { return m.id === data.msgId; });
@@ -1571,7 +1573,7 @@ io.on('connection', function(socket) {
   //  MESSAGE PIN
   // -------------------------------------------------------
   socket.on('message:pin', function(data) {
-    if (!db.users[username] || !db.users[username].isPro) return;
+    if (!db.users[username]) return;
 
     const chatId = getChatId(username, data.to);
     const msg = (db.messages[chatId] || []).find(function(m) { return m.id === data.msgId; });
@@ -1619,6 +1621,7 @@ io.on('connection', function(socket) {
       text: data.text || '',
       type: data.type || 'text',
       fileInfo: data.fileInfo || null,
+      replyTo: data.replyTo || null,
       time: new Date().toISOString(),
       reactions: [],
       pinned: false,
@@ -1669,7 +1672,7 @@ io.on('connection', function(socket) {
   //  GROUP REACTIONS (via Socket)
   // -------------------------------------------------------
   socket.on('group:react', function(data) {
-    if (!db.users[username] || !db.users[username].isPro) return;
+    if (!db.users[username]) return;
 
     const g = db.groups[data.groupId];
     if (!g) return;
@@ -1697,7 +1700,7 @@ io.on('connection', function(socket) {
   //  GROUP PIN (via Socket)
   // -------------------------------------------------------
   socket.on('group:pin', function(data) {
-    if (!db.users[username] || !db.users[username].isPro) return;
+    if (!db.users[username]) return;
 
     const g = db.groups[data.groupId];
     if (!g || !g.messages) return;
@@ -1737,6 +1740,57 @@ io.on('connection', function(socket) {
       const ms = onlineUsers.get(m.username);
       if (ms) io.to(ms).emit('group:messageDeleted', { groupId: g.id, msgId: data.msgId });
     });
+  });
+
+  // -------------------------------------------------------
+  //  MESSAGE EDIT (Socket)
+  // -------------------------------------------------------
+  socket.on('message:edit', function(data) {
+    const chatId = getChatId(username, data.to);
+    const msg = (db.messages[chatId] || []).find(function(m) { return m.id === data.msgId; });
+    if (!msg || msg.from !== username) return;
+    if (!data.text || !data.text.trim()) return;
+    msg.text = data.text.trim();
+    msg.edited = true;
+    const otherSocket = onlineUsers.get(data.to);
+    if (otherSocket) io.to(otherSocket).emit('message:edited', { chatId: chatId, msg: msg });
+    socket.emit('message:edited', { chatId: chatId, msg: msg });
+    saveDB();
+  });
+
+  // -------------------------------------------------------
+  //  MESSAGE DELETE (Socket — for everyone)
+  // -------------------------------------------------------
+  socket.on('message:delete', function(data) {
+    const chatId = getChatId(username, data.to);
+    const msg = (db.messages[chatId] || []).find(function(m) { return m.id === data.msgId; });
+    if (!msg || msg.from !== username) return;
+    msg.deleted = true;
+    msg.text = '';
+    msg.fileInfo = null;
+    msg.replyTo = null;
+    const otherSocket = onlineUsers.get(data.to);
+    if (otherSocket) io.to(otherSocket).emit('message:deleted', { chatId: chatId, msgId: data.msgId });
+    socket.emit('message:deleted', { chatId: chatId, msgId: data.msgId });
+    saveDB();
+  });
+
+  // -------------------------------------------------------
+  //  GROUP MESSAGE EDIT (Socket)
+  // -------------------------------------------------------
+  socket.on('group:editMessage', function(data) {
+    const g = db.groups[data.groupId];
+    if (!g || !g.messages) return;
+    const msg = g.messages.find(function(m) { return m.id === data.msgId; });
+    if (!msg || msg.from !== username) return;
+    if (!data.text || !data.text.trim()) return;
+    msg.text = data.text.trim();
+    msg.edited = true;
+    g.members.forEach(function(m) {
+      const ms = onlineUsers.get(m.username);
+      if (ms) io.to(ms).emit('group:messageEdited', { groupId: g.id, msg: msg });
+    });
+    saveDB();
   });
 
   // -------------------------------------------------------
